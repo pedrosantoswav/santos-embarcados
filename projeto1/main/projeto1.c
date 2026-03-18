@@ -5,7 +5,7 @@
  * 
  * Autor: Pedro Henrique Silva dos Santos
  * Data: 18/03/2026
- * Versão: 0.0.1
+ * Versão: 0.1.0
  *
  * Descrição:
  * Programa que exibe informações do ESP32 utilizando ESP_LOGI
@@ -30,14 +30,14 @@ void app_main(void)
 {
     static const char *TAG = "INFO_ESP";
 
-    ESP_LOGI(TAG, "Iniciando programa...\n");
+    ESP_LOGI(TAG, "Iniciando programa...");
 
     esp_chip_info_t chip_info;
     uint32_t flash_size;
 
     esp_chip_info(&chip_info);
 
-    ESP_LOGI(TAG, "Sobre o dipositivo:\n");
+    ESP_LOGI(TAG, "Sobre o dipositivo:");
 
     ESP_LOGI(TAG, "Chip: %s", CONFIG_IDF_TARGET);
 
@@ -47,7 +47,7 @@ void app_main(void)
     ESP_LOGI(TAG, "Revisão do chip: v%d.%d", major_rev, minor_rev);
     ESP_LOGI(TAG, "Numero de nucleos: %d", chip_info.cores);
 
-    ESP_LOGI(TAG, "\nConectividade:\n");
+    ESP_LOGI(TAG, "Conectividade:");
 
     ESP_LOGI(TAG, "WiFi: %s",
              (chip_info.features & CHIP_FEATURE_WIFI_BGN) ? "SIM" : "NAO");
@@ -58,7 +58,7 @@ void app_main(void)
     ESP_LOGI(TAG, "BLE: %s",
              (chip_info.features & CHIP_FEATURE_BLE) ? "SIM" : "NAO");
 
-    ESP_LOGI(TAG, "\nArmazenamento:\n");
+    ESP_LOGI(TAG, "Armazenamento:");
 
     if (esp_flash_get_size(NULL, &flash_size) == ESP_OK)
     {
@@ -68,15 +68,17 @@ void app_main(void)
     }
     else
     {
-        ESP_LOGE(TAG, "Erro ao obter tamanho da flash");
+        ESP_LOGE(TAG, "Erro ao obter tamanho da memória flash");
     }
 
     ESP_LOGI(TAG, "Heap minima livre: %" PRIu32 " bytes",
              esp_get_minimum_free_heap_size());
 
-    ESP_LOGI(TAG, "\nInformação de Software:\n");
+    ESP_LOGI(TAG, "Informação de Software:");
 
     ESP_LOGI(TAG, "ESP-IDF: %s", esp_get_idf_version());
 
-    ESP_LOGI(TAG, "\nFim do Programa.");
+    ESP_LOGI(TAG, "Fim do Programa.");
+    vTaskDelay(pdMS_TO_TICKS(1000)); // 1000 ms = 1 segundo
+
 }

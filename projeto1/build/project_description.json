@@ -1,7 +1,7 @@
 {
     "version":            "1.2",
     "project_name":       "projeto1",
-    "project_version":    "37969c2",
+    "project_version":    "8bcbb16-dirty",
     "project_path":       "C:/Users/sistemembarcados/santos-embarcados/projeto1",
     "idf_path":           "C:/Users/sistemembarcados/esp/v5.5.3/esp-idf",
     "build_dir":          "C:/Users/sistemembarcados/santos-embarcados/projeto1/build",
@@ -370,7 +370,7 @@
             "managed_reqs": [],
             "managed_priv_reqs": [],
             "file": "C:/Users/sistemembarcados/santos-embarcados/projeto1/build/esp-idf/main/libmain.a",
-            "sources": [ "C:/Users/sistemembarcados/santos-embarcados/projeto1/main/hello_world_main.c" ],
+            "sources": [ "C:/Users/sistemembarcados/santos-embarcados/projeto1/main/projeto1.c" ],
             "include_dirs": []
         },
         "mbedtls": {
