@@ -1,9 +1,16 @@
 /*
- *
+ * =========================================================
+ * Projeto 1
  * Sistemas Embarcados
- * Pedro Henrique Silva dos Santos
- * 18 de março de 2026
  * 
+ * Autor: Pedro Henrique Silva dos Santos
+ * Data: 18/03/2026
+ * Versão: 0.0.1
+ *
+ * Descrição:
+ * Programa que exibe informações do ESP32 utilizando ESP_LOGI
+ * sem gerar reset do processador.
+ * =========================================================
  */
 
 #include <stdio.h>
