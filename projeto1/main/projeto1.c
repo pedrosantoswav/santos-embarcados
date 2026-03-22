@@ -78,7 +78,7 @@ void app_main(void)
 
     ESP_LOGI(TAG, "ESP-IDF: %s", esp_get_idf_version());
 
-    ESP_LOGI(TAG, "Fim do Programa.");
+    ESP_LOGI(TAG, "Fim do Programa!!!");
     vTaskDelay(pdMS_TO_TICKS(1000)); // 1000 ms = 1 segundo
 
 }
