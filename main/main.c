@@ -40,7 +40,7 @@ void app_main(void)
     // Preenche a estrutura chip_info com dados do microcontrolador
     esp_chip_info(&chip_info);
 
-    ESP_LOGI(TAG, "Sobre o dispositivo:");
+    ESP_LOGI(TAG, "--- Sobre o dispositivo ---");
 
     // Exibe o modelo do chip (ex: esp32, esp32s3, etc.)
     ESP_LOGI(TAG, "Chip: %s", CONFIG_IDF_TARGET);
@@ -55,7 +55,7 @@ void app_main(void)
     // Exibe o número de núcleos do processador
     ESP_LOGI(TAG, "Numero de nucleos: %d", chip_info.cores);
 
-    ESP_LOGI(TAG, "Conectividade:");
+    ESP_LOGI(TAG, "--- Conectividade ---");
 
     // Verifica se o chip possui suporte a Wi-Fi
     ESP_LOGI(TAG, "WiFi: %s",
@@ -69,7 +69,7 @@ void app_main(void)
     ESP_LOGI(TAG, "BLE: %s",
              (chip_info.features & CHIP_FEATURE_BLE) ? "SIM" : "NAO");
 
-    ESP_LOGI(TAG, "Armazenamento:");
+    ESP_LOGI(TAG, "--- Armazenamento ---");
 
     // Obtém o tamanho da memória flash
     if (esp_flash_get_size(NULL, &flash_size) == ESP_OK)
