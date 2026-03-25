@@ -155,57 +155,72 @@ void app_main(void)
 
     /*
 
-    //zero-initialize the config structure.
+    // inicializa a estrutura de configuração com zero
     gpio_config_t io_conf = {};
-    //disable interrupt
+
+    // desabilita interrupção
     io_conf.intr_type = GPIO_INTR_DISABLE;
-    //set as output mode
+
+    // define como modo de saída
     io_conf.mode = GPIO_MODE_OUTPUT;
-    //bit mask of the pins that you want to set,e.g.GPIO18/19
+
+    // máscara de bits dos pinos que você quer configurar, ex: GPIO18/19
     io_conf.pin_bit_mask = GPIO_OUTPUT_PIN_SEL;
-    //disable pull-down mode
+
+    // desabilita pull-down
     io_conf.pull_down_en = 0;
-    //disable pull-up mode
+
+    // desabilita pull-up
     io_conf.pull_up_en = 0;
-    //configure GPIO with the given settings
+
+    // configura o GPIO com as definições acima
     gpio_config(&io_conf);
 
-    //interrupt of rising edge
+    // interrupção na borda de subida
     io_conf.intr_type = GPIO_INTR_POSEDGE;
-    //bit mask of the pins, use GPIO4/5 here
+
+    // máscara de bits dos pinos, usando GPIO4/5 aqui
     io_conf.pin_bit_mask = GPIO_INPUT_PIN_SEL;
-    //set as input mode
+
+    // define como modo de entrada
     io_conf.mode = GPIO_MODE_INPUT;
-    //enable pull-up mode
+
+    // habilita pull-up
     io_conf.pull_up_en = 1;
+
     gpio_config(&io_conf);
 
-    //change gpio interrupt type for one pin
+    // altera o tipo de interrupção para um pino específico
     gpio_set_intr_type(GPIO_INPUT_IO_0, GPIO_INTR_ANYEDGE);
 
-    //create a queue to handle gpio event from isr
+    // cria uma fila para tratar eventos do GPIO vindos da ISR
     gpio_evt_queue = xQueueCreate(10, sizeof(uint32_t));
-    //start gpio task
+
+    // inicia a task do GPIO
     xTaskCreate(gpio_task_example, "gpio_task_example", 2048, NULL, 10, NULL);
 
-    //install gpio isr service
+    // instala o serviço de ISR do GPIO
     gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT);
-    //hook isr handler for specific gpio pin
+
+    // conecta o handler de interrupção a um pino específico
     gpio_isr_handler_add(GPIO_INPUT_IO_0, gpio_isr_handler, (void*) GPIO_INPUT_IO_0);
-    //hook isr handler for specific gpio pin
+
+    // conecta o handler de interrupção a outro pino específico
     gpio_isr_handler_add(GPIO_INPUT_IO_1, gpio_isr_handler, (void*) GPIO_INPUT_IO_1);
 
-    //remove isr handler for gpio number.
+    // remove o handler de interrupção de um pino
     gpio_isr_handler_remove(GPIO_INPUT_IO_0);
-    //hook isr handler for specific gpio pin again
+        
+    // adiciona novamente o handler de interrupção ao pino
     gpio_isr_handler_add(GPIO_INPUT_IO_0, gpio_isr_handler, (void*) GPIO_INPUT_IO_0);
 
-    printf("Minimum free heap size: %"PRIu32" bytes\n", esp_get_minimum_free_heap_size());
+    printf("Menor tamanho de heap livre: %"PRIu32" bytes\n", esp_get_minimum_free_heap_size());
 
     int cnt = 0;
     while (1) {
         printf("cnt: %d\n", cnt++);
         vTaskDelay(1000 / portTICK_PERIOD_MS);
+
         gpio_set_level(GPIO_OUTPUT_IO_0, cnt % 2);
         gpio_set_level(GPIO_OUTPUT_IO_1, cnt % 2);
     }
