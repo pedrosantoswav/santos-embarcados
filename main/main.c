@@ -4,8 +4,8 @@
  * Sistemas Embarcados
  * 
  * Autor: Pedro Henrique Silva dos Santos
- * Data: 18/03/2026
- * Versão: 0.1.1
+ * Data: 31/03/2026
+ * Versão: 0.2.0
  *
  * Descrição:
  * Programa que exibe informações do ESP32 utilizando ESP_LOGI
