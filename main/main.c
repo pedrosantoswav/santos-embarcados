@@ -30,200 +30,156 @@
 #include "esp_log.h"            // Sistema de logging (ESP_LOGI, ESP_LOGE, etc.)
 #include "esp_idf_version.h"    // Versão do ESP-IDF
 
-#define GPIO_OUTPUT_IO_0    18
-#define GPIO_OUTPUT_IO_1    19
-#define GPIO_OUTPUT_PIN_SEL  ((1ULL<<GPIO_OUTPUT_IO_0) | (1ULL<<GPIO_OUTPUT_IO_1))
+// =================== DEFINIÇÕES ===================
 
-#define GPIO_INPUT_IO_0     4
-#define GPIO_INPUT_IO_1     5
-#define GPIO_INPUT_PIN_SEL  ((1ULL<<GPIO_INPUT_IO_0) | (1ULL<<GPIO_INPUT_IO_1))
+// Botões
+#define B0 21
+#define B1 22
+#define B2 23
 
-#define ESP_INTR_FLAG_DEFAULT 0
+#define GPIO_INPUT_PIN_SEL ((1ULL<<B0) | (1ULL<<B1) | (1ULL<<B2))
 
+// LED azul
+#define LED 2
+#define GPIO_OUTPUT_PIN_SEL (1ULL<<LED)
+
+// TAGs
+static const char *TAG_SYS  = "INFO_ESP";
+static const char *TAG_GPIO = "GPIO";
+
+// Fila
 static QueueHandle_t gpio_evt_queue = NULL;
+
+// =================== ISR ===================
 
 static void IRAM_ATTR gpio_isr_handler(void* arg)
 {
     uint32_t gpio_num = (uint32_t) arg;
-    xQueueSendFromISR(gpio_evt_queue, &gpio_num, NULL);
+
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+    xQueueSendFromISR(gpio_evt_queue, &gpio_num, &xHigherPriorityTaskWoken);
+
+    if (xHigherPriorityTaskWoken)
+    {
+        portYIELD_FROM_ISR();
+    }
 }
 
-static void gpio_task_example(void* arg)
+// =================== TASK ===================
+
+static void gpio_task(void* arg)
 {
     uint32_t io_num;
-    for (;;) {
-        if (xQueueReceive(gpio_evt_queue, &io_num, portMAX_DELAY)) {
-            printf("GPIO[%"PRIu32"] intr, val: %d\n", io_num, gpio_get_level(io_num));
+    int led_state = 0;
+
+    while (1)
+    {
+        if (xQueueReceive(gpio_evt_queue, &io_num, portMAX_DELAY))
+        {
+            int level = gpio_get_level(io_num);
+
+            ESP_LOGI(TAG_GPIO, "GPIO[%" PRIu32 "] pressionado | Nivel: %d", io_num, level);
+
+            // ===== CONTROLE DO LED =====
+
+            if (io_num == B0)
+            {
+                gpio_set_level(LED, 1);
+                led_state = 1;
+                ESP_LOGI(TAG_GPIO, "LED LIGADO (Botao 0)");
+            }
+            else if (io_num == B1)
+            {
+                gpio_set_level(LED, 0);
+                led_state = 0;
+                ESP_LOGI(TAG_GPIO, "LED DESLIGADO (Botao 1)");
+            }
+            else if (io_num == B2)
+            {
+                led_state = !led_state;
+                gpio_set_level(LED, led_state);
+                ESP_LOGI(TAG_GPIO, "LED TOGGLE (Botao 2)");
+            }
         }
     }
 }
 
+// =================== MAIN ===================
+
 void app_main(void)
 {
-    gpio_config_t io_conf = {
-        .mode = GPIO_MODE_INPUT,
-        .pin_bit_mask =
-            (1ULL << B0) |
-            (1ULL << B1) |
-            (1ULL << B2),
+    // =================== INFO DO SISTEMA ===================
 
-        .pull_up_en = GPIO_PULLUP_ENABLE,
-        .pull_down_en = GPIO_PULLDOWN_DISABLE,
-        .intr_type = GPIO_INTR_NEGEDGE
-    };
+    ESP_LOGI(TAG_SYS, "Iniciando programa...");
 
-    gpio_config(&io_conf);
+    esp_chip_info_t chip_info;
+    uint32_t flash_size;
 
-    // INICIALIZAÇÃO - INFORMAÇÕES DO DISPOSITIVO
-
-    // TAG usada para identificar as mensagens no log
-    static const char *TAG = "INFO_ESP";
-
-    // Mensagem inicial indicando que o programa começou
-    ESP_LOGI(TAG, "Iniciando programa...");
-
-    esp_chip_info_t chip_info; // Estrutura para armazenar informações do chip
-    uint32_t flash_size;       // Variável para armazenar o tamanho da flash
-
-    // Preenche a estrutura chip_info com dados do microcontrolador
     esp_chip_info(&chip_info);
 
-    ESP_LOGI(TAG, "--- Sobre o dispositivo ---");
+    ESP_LOGI(TAG_SYS, "Chip: %s", CONFIG_IDF_TARGET);
 
-    // Exibe o modelo do chip (ex: esp32, esp32s3, etc.)
-    ESP_LOGI(TAG, "Chip: %s", CONFIG_IDF_TARGET);
+    unsigned major = chip_info.revision / 100;
+    unsigned minor = chip_info.revision % 100;
 
-    // Calcula a versão do chip (major.minor)
-    unsigned major_rev = chip_info.revision / 100;
-    unsigned minor_rev = chip_info.revision % 100;
+    ESP_LOGI(TAG_SYS, "Revisao: v%d.%d", major, minor);
+    ESP_LOGI(TAG_SYS, "Nucleos: %d", chip_info.cores);
 
-    // Exibe a revisão do chip
-    ESP_LOGI(TAG, "Revisão do chip: v%d.%d", major_rev, minor_rev);
+    ESP_LOGI(TAG_SYS, "WiFi: %s",
+        (chip_info.features & CHIP_FEATURE_WIFI_BGN) ? "SIM" : "NAO");
 
-    // Exibe o número de núcleos do processador
-    ESP_LOGI(TAG, "Numero de nucleos: %d", chip_info.cores);
+    ESP_LOGI(TAG_SYS, "Bluetooth: %s",
+        (chip_info.features & CHIP_FEATURE_BT) ? "SIM" : "NAO");
 
-    ESP_LOGI(TAG, "--- Conectividade ---");
+    ESP_LOGI(TAG_SYS, "BLE: %s",
+        (chip_info.features & CHIP_FEATURE_BLE) ? "SIM" : "NAO");
 
-    // Verifica se o chip possui suporte a Wi-Fi
-    ESP_LOGI(TAG, "WiFi: %s",
-             (chip_info.features & CHIP_FEATURE_WIFI_BGN) ? "SIM" : "NAO");
-
-    // Verifica se possui Bluetooth clássico
-    ESP_LOGI(TAG, "Bluetooth: %s",
-             (chip_info.features & CHIP_FEATURE_BT) ? "SIM" : "NAO");
-
-    // Verifica se possui BLE (Bluetooth Low Energy)
-    ESP_LOGI(TAG, "BLE: %s",
-             (chip_info.features & CHIP_FEATURE_BLE) ? "SIM" : "NAO");
-
-    ESP_LOGI(TAG, "--- Armazenamento ---");
-
-    // Obtém o tamanho da memória flash
     if (esp_flash_get_size(NULL, &flash_size) == ESP_OK)
     {
-        // Exibe o tamanho da flash em MB e se é embutida ou externa
-        ESP_LOGI(TAG, "Flash: %" PRIu32 " MB (%s)",
-                 flash_size / (1024 * 1024),
-                 (chip_info.features & CHIP_FEATURE_EMB_FLASH) ? "embutida" : "externa");
-    }
-    else
-    {
-        // Caso ocorra erro ao obter o tamanho da flash
-        ESP_LOGE(TAG, "Erro ao obter tamanho da memória flash");
+        ESP_LOGI(TAG_SYS, "Flash: %" PRIu32 " MB",
+                 flash_size / (1024 * 1024));
     }
 
-    // Exibe a menor quantidade de heap livre registrada
-    // (útil para análise de consumo de memória)
-    ESP_LOGI(TAG, "Heap minima livre: %" PRIu32 " bytes",
+    ESP_LOGI(TAG_SYS, "Heap minimo: %" PRIu32 " bytes",
              esp_get_minimum_free_heap_size());
 
-    ESP_LOGI(TAG, "Informação de Software:");
+    ESP_LOGI(TAG_SYS, "ESP-IDF: %s", esp_get_idf_version());
 
-    // Exibe a versão do framework ESP-IDF em uso
-    ESP_LOGI(TAG, "ESP-IDF: %s", esp_get_idf_version());
+    // =================== CONFIGURA GPIO ===================
 
-    // Mensagem final indicando término da execução
-    ESP_LOGI(TAG, "Fim do Programa!!!");
+    gpio_config_t io_conf;
 
-    // Aguarda 1 segundo antes de finalizar a tarefa
-    vTaskDelay(pdMS_TO_TICKS(1000));
-
-    //------------------------------------------------------------------------------------------------------
-
-    gpio_dump_io_configuration(stdout, (1ULL << 4) | (1ULL << 5) |(1ULL << 18) | (1ULL << 19));
-
-    /*
-
-    // inicializa a estrutura de configuração com zero
-    gpio_config_t io_conf = {};
-
-    // desabilita interrupção
-    io_conf.intr_type = GPIO_INTR_DISABLE;
-
-    // define como modo de saída
+    // LED
     io_conf.mode = GPIO_MODE_OUTPUT;
-
-    // máscara de bits dos pinos que você quer configurar, ex: GPIO18/19
     io_conf.pin_bit_mask = GPIO_OUTPUT_PIN_SEL;
-
-    // desabilita pull-down
-    io_conf.pull_down_en = 0;
-
-    // desabilita pull-up
-    io_conf.pull_up_en = 0;
-
-    // configura o GPIO com as definições acima
+    io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
+    io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+    io_conf.intr_type = GPIO_INTR_DISABLE;
     gpio_config(&io_conf);
 
-    // interrupção na borda de subida
-    io_conf.intr_type = GPIO_INTR_POSEDGE;
-
-    // máscara de bits dos pinos, usando GPIO4/5 aqui
-    io_conf.pin_bit_mask = GPIO_INPUT_PIN_SEL;
-
-    // define como modo de entrada
+    // BOTÕES
     io_conf.mode = GPIO_MODE_INPUT;
-
-    // habilita pull-up
-    io_conf.pull_up_en = 1;
-
+    io_conf.pin_bit_mask = GPIO_INPUT_PIN_SEL;
+    io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
+    io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+    io_conf.intr_type = GPIO_INTR_NEGEDGE;
     gpio_config(&io_conf);
 
-    // altera o tipo de interrupção para um pino específico
-    gpio_set_intr_type(GPIO_INPUT_IO_0, GPIO_INTR_ANYEDGE);
+    // =================== FILA ===================
 
-    // cria uma fila para tratar eventos do GPIO vindos da ISR
     gpio_evt_queue = xQueueCreate(10, sizeof(uint32_t));
 
-    // inicia a task do GPIO
-    xTaskCreate(gpio_task_example, "gpio_task_example", 2048, NULL, 10, NULL);
+    // =================== TASK ===================
 
-    // instala o serviço de ISR do GPIO
-    gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT);
+    xTaskCreate(gpio_task, "gpio_task", 2048, NULL, 10, NULL);
 
-    // conecta o handler de interrupção a um pino específico
-    gpio_isr_handler_add(GPIO_INPUT_IO_0, gpio_isr_handler, (void*) GPIO_INPUT_IO_0);
+    // =================== ISR ===================
 
-    // conecta o handler de interrupção a outro pino específico
-    gpio_isr_handler_add(GPIO_INPUT_IO_1, gpio_isr_handler, (void*) GPIO_INPUT_IO_1);
+    gpio_install_isr_service(0);
 
-    // remove o handler de interrupção de um pino
-    gpio_isr_handler_remove(GPIO_INPUT_IO_0);
-        
-    // adiciona novamente o handler de interrupção ao pino
-    gpio_isr_handler_add(GPIO_INPUT_IO_0, gpio_isr_handler, (void*) GPIO_INPUT_IO_0);
+    gpio_isr_handler_add(B0, gpio_isr_handler, (void*) B0);
+    gpio_isr_handler_add(B1, gpio_isr_handler, (void*) B1);
+    gpio_isr_handler_add(B2, gpio_isr_handler, (void*) B2);
 
-    printf("Menor tamanho de heap livre: %"PRIu32" bytes\n", esp_get_minimum_free_heap_size());
-
-    int cnt = 0;
-    while (1) {
-        printf("cnt: %d\n", cnt++);
-        vTaskDelay(1000 / portTICK_PERIOD_MS);
-
-        gpio_set_level(GPIO_OUTPUT_IO_0, cnt % 2);
-        gpio_set_level(GPIO_OUTPUT_IO_1, cnt % 2);
-    }
-
-    */
+    ESP_LOGI(TAG_GPIO, "Sistema pronto. Aguardando botoes...");
 }
