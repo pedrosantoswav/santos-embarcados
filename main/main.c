@@ -8,8 +8,8 @@
  * Versão: 0.2.3
  *
  * Descrição:
- * Programa que exibe informações do ESP32 utilizando ESP_LOGI
- * sem gerar reset do processador.
+ * Exibe as informações do processador e controla LED através de switch buttons
+ * 
  * =========================================================
  */
 
