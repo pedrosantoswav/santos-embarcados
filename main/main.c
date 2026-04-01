@@ -101,6 +101,9 @@ static void gpio_task(void* arg)
                 led_state = !led_state;
                 gpio_set_level(LED, led_state);
 
+                ESP_LOGW(TAG_GPIO,
+                "Atenção!!! Lógica do Botão 2 está sujeito à problemas por falta de debounce");
+
                 if(led_state == 1)
                     ESP_LOGI(TAG_GPIO, "LED LIGADO (Botao 2)");
                 
