@@ -52,6 +52,8 @@ static QueueHandle_t gpio_evt_queue = NULL;
 
 // =================== ISR ===================
 
+// Avalia se uma tarefa de maior prioridade foi desbloqueada e, se sim, solicita a troca de contexto imediata.
+
 static void IRAM_ATTR gpio_isr_handler(void* arg)
 {
     uint32_t gpio_num = (uint32_t) arg;
@@ -98,7 +100,12 @@ static void gpio_task(void* arg)
             {
                 led_state = !led_state;
                 gpio_set_level(LED, led_state);
-                ESP_LOGI(TAG_GPIO, "LED TOGGLE (Botao 2)");
+
+                if(led_state == 1)
+                    ESP_LOGI(TAG_GPIO, "LED LIGADO (Botao 2)");
+                
+                else
+                    ESP_LOGI(TAG_GPIO, "LED DESLIGADO (Botao 2)");
             }
         }
     }
