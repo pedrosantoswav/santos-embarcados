@@ -39,7 +39,7 @@
 
 #define GPIO_INPUT_PIN_SEL ((1ULL<<B0) | (1ULL<<B1) | (1ULL<<B2))
 
-// LED azul
+// LED
 #define LED 2
 #define GPIO_OUTPUT_PIN_SEL (1ULL<<LED)
 
@@ -69,7 +69,7 @@ static void IRAM_ATTR gpio_isr_handler(void* arg)
 
 // =================== TASK ===================
 
-static void gpio_task(void* arg)
+static void led_control(void* arg)
 {
     uint32_t io_num;
     int led_state = 0;
@@ -102,13 +102,13 @@ static void gpio_task(void* arg)
                 gpio_set_level(LED, led_state);
 
                 ESP_LOGW(TAG_GPIO,
-                "Atenção!!! Lógica do Botão 2 está sujeito à problemas por falta de debounce");
+                "Atenção!!! Lógica do Botão 2 não possui debounce, sujeito a múltiplos acionamentos");
 
                 if(led_state == 1)
-                    ESP_LOGI(TAG_GPIO, "LED LIGADO (Botao 2)");
+                    ESP_LOGI(TAG_GPIO, "LED LIGADO (Botão 2)");
                 
                 else
-                    ESP_LOGI(TAG_GPIO, "LED DESLIGADO (Botao 2)");
+                    ESP_LOGI(TAG_GPIO, "LED DESLIGADO (Botão 2)");
             }
         }
     }
@@ -159,14 +159,6 @@ void app_main(void)
 
     gpio_config_t io_conf;
 
-    // LED
-    io_conf.mode = GPIO_MODE_OUTPUT;
-    io_conf.pin_bit_mask = GPIO_OUTPUT_PIN_SEL;
-    io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
-    io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
-    io_conf.intr_type = GPIO_INTR_DISABLE;
-    gpio_config(&io_conf);
-
     // BOTÕES
     io_conf.mode = GPIO_MODE_INPUT;
     io_conf.pin_bit_mask = GPIO_INPUT_PIN_SEL;
@@ -175,21 +167,32 @@ void app_main(void)
     io_conf.intr_type = GPIO_INTR_NEGEDGE;
     gpio_config(&io_conf);
 
+    // LED
+    io_conf.mode = GPIO_MODE_OUTPUT;
+    io_conf.pin_bit_mask = GPIO_OUTPUT_PIN_SEL;
+    io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
+    io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+    io_conf.intr_type = GPIO_INTR_DISABLE;
+    gpio_config(&io_conf);
+
     // =================== FILA ===================
 
     gpio_evt_queue = xQueueCreate(10, sizeof(uint32_t));
 
     // =================== TASK ===================
 
-    xTaskCreate(gpio_task, "gpio_task", 2048, NULL, 10, NULL);
+    // Criação da tarefa de controle do LED
+    xTaskCreate(led_control, "led_control", 2048, NULL, 10, NULL);
 
     // =================== ISR ===================
 
+    // Inicialização do serviço de interrupção
     gpio_install_isr_service(0);
 
+    // Associação dos pinos à interrupção
     gpio_isr_handler_add(B0, gpio_isr_handler, (void*) B0);
     gpio_isr_handler_add(B1, gpio_isr_handler, (void*) B1);
     gpio_isr_handler_add(B2, gpio_isr_handler, (void*) B2);
 
-    ESP_LOGI(TAG_GPIO, "Sistema pronto. Aguardando botoes...");
+    ESP_LOGI(TAG_GPIO, "Sistema pronto. Aguardando entrada...");
 }
