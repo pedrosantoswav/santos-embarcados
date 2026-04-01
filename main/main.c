@@ -1,6 +1,6 @@
 /*
  * =========================================================
- * Projeto 1
+ * Projeto 2
  * Sistemas Embarcados
  * 
  * Autor: Pedro Henrique Silva dos Santos
