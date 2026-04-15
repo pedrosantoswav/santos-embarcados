@@ -5,7 +5,7 @@
  * 
  * Autor: Pedro Henrique Silva dos Santos
  * Data: 14/04/2026
- * Versão: 0.3.0
+ * Versão: 0.3.1
  *
  * Descrição:
  * Exibe as informações do processador e controla LED através de switch buttons
@@ -22,8 +22,8 @@
 #include "freertos/FreeRTOS.h"  // Kernel do FreeRTOS
 #include "freertos/task.h"      // Manipulação de tarefas
 #include "freertos/queue.h"     // Filas
-#include "driver/gpio.h"
-#include "driver/gptimer.h"
+#include "driver/gpio.h"        // Configurações pinos GPIO
+#include "driver/gptimer.h"     // Configurações TIMER
 
 #include "esp_chip_info.h"      // Informações sobre o chip ESP
 #include "esp_flash.h"          // Funções relacionadas à memória flash
@@ -113,6 +113,27 @@ static bool IRAM_ATTR timer_callback(
 // LED
 static void led_control(void* arg)
 {
+
+    // =================== CONFIGURA GPIO ===================
+
+    gpio_config_t io_conf;
+
+    // BOTÕES
+    io_conf.mode = GPIO_MODE_INPUT;
+    io_conf.pin_bit_mask = GPIO_INPUT_PIN_SEL;
+    io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
+    io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+    io_conf.intr_type = GPIO_INTR_NEGEDGE;
+    gpio_config(&io_conf);
+
+    // LED
+    io_conf.mode = GPIO_MODE_OUTPUT;
+    io_conf.pin_bit_mask = GPIO_OUTPUT_PIN_SEL;
+    io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
+    io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+    io_conf.intr_type = GPIO_INTR_DISABLE;
+    gpio_config(&io_conf);
+
     uint32_t io_num;
     int led_state = 0;
 
@@ -272,40 +293,19 @@ void app_main(void)
 
     ESP_LOGI(TAG_SYS, "ESP-IDF: %s", esp_get_idf_version());
 
-    // =================== CONFIGURA GPIO ===================
-
-    gpio_config_t io_conf;
-
-    // BOTÕES
-    io_conf.mode = GPIO_MODE_INPUT;
-    io_conf.pin_bit_mask = GPIO_INPUT_PIN_SEL;
-    io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
-    io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
-    io_conf.intr_type = GPIO_INTR_NEGEDGE;
-    gpio_config(&io_conf);
-
-    // LED
-    io_conf.mode = GPIO_MODE_OUTPUT;
-    io_conf.pin_bit_mask = GPIO_OUTPUT_PIN_SEL;
-    io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
-    io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
-    io_conf.intr_type = GPIO_INTR_DISABLE;
-    gpio_config(&io_conf);
-
-    // =================== FILA ===================
+    // =================== FILAS ===================
 
     gpio_evt_queue = xQueueCreate(10, sizeof(uint32_t));
     timer_evt_queue = xQueueCreate(10, sizeof(timer_event_t));
 
-    // =================== TASK ===================
+    // ================== TAREFAS ==================
 
-    // Criação da tarefa de controle do LED
     xTaskCreate(led_control, "led_control", 2048, NULL, 10, NULL);
     xTaskCreate(timer_task, "timer_task", 4096, NULL, 5, NULL);
 
-    // =================== ISR ===================
+    // ==================== ISR ====================
 
-    // Inicialização do serviço de interrupção
+    // Inicialização do serviço de interrupção (Interrupt Service Routines)
     gpio_install_isr_service(0);
 
     // Associação dos pinos à interrupção
@@ -313,5 +313,4 @@ void app_main(void)
     gpio_isr_handler_add(B1, gpio_isr_handler, (void*) B1);
     gpio_isr_handler_add(B2, gpio_isr_handler, (void*) B2);
 
-    ESP_LOGI(TAG_GPIO, "Sistema pronto. Aguardando entrada...");
 }
