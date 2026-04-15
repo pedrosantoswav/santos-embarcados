@@ -196,9 +196,7 @@ void timer_task(void *arg)
         .on_alarm = timer_callback,
     };
 
-    // gora usa fila correta
     ESP_ERROR_CHECK(gptimer_register_event_callbacks(timer, &cbs, timer_evt_queue));
-
     ESP_ERROR_CHECK(gptimer_enable(timer));
 
     gptimer_alarm_config_t alarm_config = {
