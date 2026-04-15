@@ -5,7 +5,7 @@
  * 
  * Autor: Pedro Henrique Silva dos Santos
  * Data: 14/04/2026
- * Versão: 0.3.2
+ * Versão: 0.3.2 
  *
  * Descrição:
  * Exibe as informações do processador e controla LED através de switch buttons
