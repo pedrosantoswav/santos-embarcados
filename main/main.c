@@ -360,3 +360,203 @@ void app_main(void)
     gpio_isr_handler_add(B1, gpio_isr_handler, (void*) B1);
     gpio_isr_handler_add(B2, gpio_isr_handler, (void*) B2);
 }
+
+/*
+
+Codigo ADC
+
+#include <stdio.h>
+#include <inttypes.h>
+#include <stdbool.h>
+
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "freertos/queue.h"
+#include "freertos/semphr.h"
+
+#include "driver/gptimer.h"
+#include "esp_log.h"
+
+#include "esp_adc/adc_oneshot.h"
+#include "esp_adc/adc_cali.h"
+#include "esp_adc/adc_cali_scheme.h"
+
+// ================= TAGS =================
+static const char *TAG_ADC   = "ADC_TASK";
+static const char *TAG_TIMER = "TIMER";
+
+// ================= FILAS =================
+static QueueHandle_t adc_queue = NULL;
+static QueueHandle_t timer_evt_queue = NULL;
+
+// ================= SEMÁFORO =================
+static SemaphoreHandle_t semaphore_adc = NULL;
+
+// ================= TIPOS =================
+
+typedef struct {
+    int raw;
+    int voltage;
+} adc_data_t;
+
+typedef struct {
+    uint64_t count;
+    uint64_t alarm;
+} timer_event_t;
+
+// ================= CALLBACK TIMER =================
+
+static bool IRAM_ATTR timer_callback(
+    gptimer_handle_t timer,
+    const gptimer_alarm_event_data_t *edata,
+    void *user_data)
+{
+    BaseType_t high_task_awoken = pdFALSE;
+    QueueHandle_t queue = (QueueHandle_t)user_data;
+
+    timer_event_t evt = {
+        .count = edata->count_value,
+        .alarm = edata->alarm_value
+    };
+
+    xQueueSendFromISR(queue, &evt, &high_task_awoken);
+
+    gptimer_alarm_config_t alarm_config = {
+        .alarm_count = edata->alarm_value + 100000 // 100 ms
+    };
+
+    gptimer_set_alarm_action(timer, &alarm_config);
+
+    return (high_task_awoken == pdTRUE);
+}
+
+// ================= TASK ADC =================
+
+void adc_task(void *arg)
+{
+    adc_oneshot_unit_handle_t adc_handle;
+
+    adc_oneshot_unit_init_cfg_t init_config = {
+        .unit_id = ADC_UNIT_1,
+    };
+    adc_oneshot_new_unit(&init_config, &adc_handle);
+
+    adc_oneshot_chan_cfg_t config = {
+        .atten = ADC_ATTEN_DB_12,
+        .bitwidth = ADC_BITWIDTH_DEFAULT, // resolução máxima
+    };
+
+    adc_oneshot_config_channel(adc_handle, ADC_CHANNEL_3, &config);
+
+    // calibração
+    adc_cali_handle_t cali_handle = NULL;
+    bool calibrated = false;
+
+#if ADC_CALI_SCHEME_CURVE_FITTING_SUPPORTED
+    adc_cali_curve_fitting_config_t cali_config = {
+        .unit_id = ADC_UNIT_1,
+        .chan = ADC_CHANNEL_3,
+        .atten = ADC_ATTEN_DB_12,
+        .bitwidth = ADC_BITWIDTH_DEFAULT,
+    };
+    if (adc_cali_create_scheme_curve_fitting(&cali_config, &cali_handle) == ESP_OK)
+        calibrated = true;
+#endif
+
+    int raw;
+    int voltage;
+    adc_data_t data;
+
+    while (1)
+    {
+        // sincroniza com timer (100 ms)
+        xSemaphoreTake(semaphore_adc, portMAX_DELAY);
+
+        adc_oneshot_read(adc_handle, ADC_CHANNEL_3, &raw);
+
+        if (calibrated)
+            adc_cali_raw_to_voltage(cali_handle, raw, &voltage);
+        else
+            voltage = 0;
+
+        data.raw = raw;
+        data.voltage = voltage;
+
+        // envia para timer
+        xQueueSend(adc_queue, &data, portMAX_DELAY);
+    }
+}
+
+// ================= TASK TIMER =================
+
+void timer_task(void *arg)
+{
+    gptimer_handle_t timer;
+
+    gptimer_config_t config = {
+        .clk_src = GPTIMER_CLK_SRC_DEFAULT,
+        .direction = GPTIMER_COUNT_UP,
+        .resolution_hz = 1000000,
+    };
+
+    gptimer_new_timer(&config, &timer);
+
+    gptimer_event_callbacks_t cbs = {
+        .on_alarm = timer_callback,
+    };
+
+    gptimer_register_event_callbacks(timer, &cbs, timer_evt_queue);
+    gptimer_enable(timer);
+
+    gptimer_alarm_config_t alarm_config = {
+        .alarm_count = 100000
+    };
+
+    gptimer_set_alarm_action(timer, &alarm_config);
+    gptimer_start(timer);
+
+    timer_event_t evt;
+    adc_data_t adc_data;
+
+    int contador = 0;
+
+    while (1)
+    {
+        if (xQueueReceive(timer_evt_queue, &evt, portMAX_DELAY))
+        {
+            // libera ADC a cada 100 ms
+            xSemaphoreGive(semaphore_adc);
+
+            contador++;
+
+            // a cada 1 segundo (10 ciclos)
+            if (contador == 10)
+            {
+                contador = 0;
+
+                if (xQueueReceive(adc_queue, &adc_data, 0))
+                {
+                    ESP_LOGI(TAG_ADC,
+                        "ADC Raw: %d | Voltage: %d mV",
+                        adc_data.raw,
+                        adc_data.voltage);
+                }
+            }
+        }
+    }
+}
+
+// ================= MAIN =================
+
+void app_main(void)
+{
+    adc_queue = xQueueCreate(10, sizeof(adc_data_t));
+    timer_evt_queue = xQueueCreate(10, sizeof(timer_event_t));
+
+    semaphore_adc = xSemaphoreCreateBinary();
+
+    xTaskCreate(adc_task, "adc_task", 4096, NULL, 5, NULL);
+    xTaskCreate(timer_task, "timer_task", 4096, NULL, 6, NULL);
+}
+
+*/
