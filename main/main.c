@@ -461,8 +461,6 @@ void adc_task(void *arg)
     adc_cali_handle_t cali = NULL;
     bool calibrated = false;
 
-#if ADC_CALI_SCHEME_LINE_FITTING_SUPPORTED
-
     adc_cali_line_fitting_config_t cal = {
         .unit_id = ADC_UNIT_1,                  // seleciona o ADC utilizado (ADC1)
         .atten = ADC_ATTEN_DB_12,               // define a atenuação do sinal (~0V a 3,3V default exemplo)
@@ -471,8 +469,6 @@ void adc_task(void *arg)
 
     if (adc_cali_create_scheme_line_fitting(&cal, &cali) == ESP_OK)  // se o esp nn encontrar erro
         calibrated = true;
-
-#endif
 
     adc_data_t data;
 
