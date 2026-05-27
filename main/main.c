@@ -658,6 +658,27 @@ void display_task(void *arg)
     // Lock the mutex due to the LVGL APIs are not thread-safe
     _lock_acquire(&lvgl_api_lock);
     example_lvgl_demo_ui(display);
+
+    while (1) {
+        
+        lv_obj_t *screen = lv_display_get_screen_active(display);
+
+        lv_obj_t *label_title = lv_label_create(screen);
+        lv_obj_t *label = lv_label_create(screen);
+        lv_obj_t *label_time = lv_label_create(screen);
+
+        lv_label_set_text(label_title, "P6 - Pedro Santos");
+        lv_obj_align(label_title, LV_ALIGN_TOP_MID, 0, 0);
+
+        lv_label_set_long_mode(label, LV_LABEL_LONG_SCROLL_CIRCULAR);
+        lv_label_set_text(label, "Palavras Aleatorias");
+        lv_obj_set_width(label, lv_display_get_horizontal_resolution(display));
+        lv_obj_align(label, LV_ALIGN_CENTER, 0, 0);
+
+        lv_label_set_text(label_time, "hh:mm:ss");
+        lv_obj_align(label_time, LV_ALIGN_BOTTOM_MID, 0, 0);
+    }
+
     _lock_release(&lvgl_api_lock);
 
 }
