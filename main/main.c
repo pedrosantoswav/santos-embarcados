@@ -12,6 +12,7 @@
  * - Relógio digital
  * - PWM automático/manual
  * - Leitura PWM através de ADC
+ * - Display LCD com tensão e horário
  * - (desativado) Controle de LED da placa via botões
  * 
  * =========================================================
