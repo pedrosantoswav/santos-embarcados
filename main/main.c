@@ -5,7 +5,7 @@
  * 
  * Autor: Pedro Henrique Silva dos Santos
  * Data: 03/06/2026
- * Versão: 0.7.0
+ * Versão: 0.7.0 
  *
  * Features:
  * - Informações detalhadas do sistema
