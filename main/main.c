@@ -5,7 +5,7 @@
  * 
  * Autor: Pedro Henrique Silva dos Santos
  * Data: 03/06/2026
- * Versão: 0.7.0 
+ * Versão: 0.7.0
  *
  * Features:
  * - Informações detalhadas do sistema
@@ -69,7 +69,6 @@
 
 static const char *TAG_MQTT = "mqtt_example";
 
-
 static void log_error_if_nonzero(const char *message, int error_code)
 {
     if (error_code != 0) {
@@ -77,16 +76,6 @@ static void log_error_if_nonzero(const char *message, int error_code)
     }
 }
 
-/*
- * @brief Event handler registered to receive MQTT events
- *
- *  This function is called by the MQTT client event loop.
- *
- * @param handler_args user data registered to the event.
- * @param base Event base for the handler(always MQTT Base in this example).
- * @param event_id The id for the received event.
- * @param event_data The data for the event, esp_mqtt_event_handle_t.
- */
 static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data)
 {
     ESP_LOGD(TAG_MQTT, "Event dispatched from event loop base=%s, event_id=%" PRIi32 "", base, event_id);
@@ -99,7 +88,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
         msg_id = esp_mqtt_client_publish(client, "/topic/qos1", "data_3", 0, 1, 0);
         ESP_LOGI(TAG_MQTT, "sent publish successful, msg_id=%d", msg_id);
 
-        msg_id = esp_mqtt_client_subscribe(client, "pwm", 0);
+        msg_id = esp_mqtt_client_subscribe(client, "setLED_value", 0);
         ESP_LOGI(TAG_MQTT, "sent subscribe successful, msg_id=%d", msg_id);
 
         msg_id = esp_mqtt_client_subscribe(client, "/topic/qos1", 1);
@@ -114,7 +103,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
 
     case MQTT_EVENT_SUBSCRIBED:
         ESP_LOGI(TAG_MQTT, "MQTT_EVENT_SUBSCRIBED, msg_id=%d", event->msg_id);
-        msg_id = esp_mqtt_client_publish(client, "pwm", "data", 0, 0, 0);
+        msg_id = esp_mqtt_client_publish(client, "setLED_value", "data", 0, 0, 0);
         ESP_LOGI(TAG_MQTT, "sent publish successful, msg_id=%d", msg_id);
         break;
     case MQTT_EVENT_UNSUBSCRIBED:
@@ -313,6 +302,7 @@ static void example_lvgl_port_task(void *arg)
 #define B0 21
 #define B1 22
 #define B2 23
+#define B3 26
 #define GPIO_INPUT_PIN_SEL ((1ULL<<B0) | (1ULL<<B1) | (1ULL<<B2))
 
 #define PWM_LED_GPIO   16
