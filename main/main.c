@@ -93,23 +93,25 @@ static uint8_t oled_buffer[EXAMPLE_LCD_H_RES * EXAMPLE_LCD_V_RES / 8];
 // LVGL library is not thread-safe, this example will call LVGL APIs from different tasks, so use a mutex to protect it
 static _lock_t lvgl_api_lock;
 
+static lv_obj_t *label_title;
+static lv_obj_t *label_voltage;
+static lv_obj_t *label_time;
+
 void example_lvgl_demo_ui(lv_display_t *disp)
 {
     lv_obj_t *screen = lv_display_get_screen_active(disp);
 
-    lv_obj_t *label_title = lv_label_create(screen);
-    lv_obj_t *label = lv_label_create(screen);
-    lv_obj_t *label_time = lv_label_create(screen);
+    label_title = lv_label_create(screen);
+    label_voltage = lv_label_create(screen);
+    label_time = lv_label_create(screen);
 
     lv_label_set_text(label_title, "P6 - Pedro Santos");
     lv_obj_align(label_title, LV_ALIGN_TOP_MID, 0, 0);
 
-    lv_label_set_long_mode(label, LV_LABEL_LONG_SCROLL_CIRCULAR);
-    lv_label_set_text(label, "Palavras Aleatorias");
-    lv_obj_set_width(label, lv_display_get_horizontal_resolution(disp));
-    lv_obj_align(label, LV_ALIGN_CENTER, 0, 0);
+    lv_label_set_text(label_voltage, "0 mV");
+    lv_obj_align(label_voltage, LV_ALIGN_CENTER, 0, 0);
 
-    lv_label_set_text(label_time, "hh:mm:ss");
+    lv_label_set_text(label_time, "00:00:00");
     lv_obj_align(label_time, LV_ALIGN_BOTTOM_MID, 0, 0);
 }
 
@@ -513,6 +515,7 @@ void timer_task(void *arg)
     uint32_t count = 0;
     adc_data_t adc_data;
     timer_event_t evt;
+    lcd_data_t lcd_data;
 
     while (1)
     {
@@ -557,6 +560,11 @@ void timer_task(void *arg)
                     ESP_LOGI(TAG_ADC,
                         "RAW: %d | Voltage: %d mV",
                         adc_data.raw, adc_data.voltage);
+
+                    lcd_data.relogio = relogio;
+                    lcd_data.voltage = adc_data.voltage;
+
+                    xQueueSend(lcd_queue, &lcd_data, 0);
                 }
             }
         }
@@ -654,28 +662,37 @@ void display_task(void *arg)
     // Lock the mutex due to the LVGL APIs are not thread-safe
     _lock_acquire(&lvgl_api_lock);
     example_lvgl_demo_ui(display);
-
-    while (1) {
-        
-        lv_obj_t *screen = lv_display_get_screen_active(display);
-
-        lv_obj_t *label_title = lv_label_create(screen);
-        lv_obj_t *label = lv_label_create(screen);
-        lv_obj_t *label_time = lv_label_create(screen);
-
-        lv_label_set_text(label_title, "P6 - Pedro Santos");
-        lv_obj_align(label_title, LV_ALIGN_TOP_MID, 0, 0);
-
-        lv_label_set_long_mode(label, LV_LABEL_LONG_SCROLL_CIRCULAR);
-        lv_label_set_text(label, "Palavras Aleatorias");
-        lv_obj_set_width(label, lv_display_get_horizontal_resolution(display));
-        lv_obj_align(label, LV_ALIGN_CENTER, 0, 0);
-
-        lv_label_set_text(label_time, "hh:mm:ss");
-        lv_obj_align(label_time, LV_ALIGN_BOTTOM_MID, 0, 0);
-    }
-
     _lock_release(&lvgl_api_lock);
+
+   lcd_data_t lcd_data;
+
+    while (1)
+    {
+        if (xQueueReceive(lcd_queue, &lcd_data, portMAX_DELAY))
+        {
+            char str_hora[16];
+            char str_tensao[32];
+
+            snprintf(str_hora,
+                    sizeof(str_hora),
+                    "%02lu:%02lu:%02lu",
+                    lcd_data.relogio.hora,
+                    lcd_data.relogio.minuto,
+                    lcd_data.relogio.segundo);
+
+            snprintf(str_tensao,
+                    sizeof(str_tensao),
+                    "%d mV",
+                    lcd_data.voltage);
+
+            _lock_acquire(&lvgl_api_lock);
+
+            lv_label_set_text(label_time, str_hora);
+            lv_label_set_text(label_voltage, str_tensao);
+
+            _lock_release(&lvgl_api_lock);
+        }
+    }
 
 }
 
@@ -725,6 +742,7 @@ void app_main(void)
     timer_evt_queue = xQueueCreate(10, sizeof(timer_event_t));
     pwm_evt_queue = xQueueCreate(10, sizeof(PWM_elements_t));
     adc_queue = xQueueCreate(10, sizeof(adc_data_t));
+    lcd_queue = xQueueCreate(5, sizeof(lcd_data_t));
 
     //Semáforos
 
