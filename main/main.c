@@ -1,11 +1,11 @@
 /*
  * =========================================================
- * Projeto 6
+ * Projeto 7
  * Sistemas Embarcados
  * 
  * Autor: Pedro Henrique Silva dos Santos
  * Data: 10/06/2026
- * Versão: 0.7.0
+ * Versão: 0.7.1
  *
  * Features:
  * - Informações detalhadas do sistema
@@ -13,6 +13,7 @@
  * - PWM automático/manual
  * - Leitura PWM através de ADC
  * - Display LCD com tensão e horário
+ * - MQTT para LED
  * - (desativado) Controle de LED da placa via botões
  * 
  * =========================================================
