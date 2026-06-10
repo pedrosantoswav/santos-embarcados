@@ -258,7 +258,7 @@ static bool IRAM_ATTR timer_callback(
 void pwm_task(void *arg)
 {
     ledc_timer_config_t timer = {
-        .speed_mode = LEDC_HIGH_SPEED_MODE,
+        .speed_mode = LEDC_LOW_SPEED_MODE,
         .timer_num = LEDC_TIMER_0,
         .duty_resolution = LEDC_TIMER_13_BIT,
         .freq_hz = 5000,
@@ -268,14 +268,14 @@ void pwm_task(void *arg)
     ledc_channel_config_t ch0 = {
         .channel = LEDC_CHANNEL_0,
         .gpio_num = PWM_LED_GPIO,
-        .speed_mode = LEDC_HIGH_SPEED_MODE,
+        .speed_mode = LEDC_LOW_SPEED_MODE,
         .timer_sel = LEDC_TIMER_0
     };
 
     ledc_channel_config_t ch1 = {
         .channel = LEDC_CHANNEL_1,
         .gpio_num = PWM_SCOPE_GPIO,
-        .speed_mode = LEDC_HIGH_SPEED_MODE,
+        .speed_mode = LEDC_LOW_SPEED_MODE,
         .timer_sel = LEDC_TIMER_0
     };
 
@@ -313,14 +313,14 @@ void pwm_task(void *arg)
         if (automatico)
             duty += 200;*/
 
-        else if (duty > 8191)
+       if (duty > 8191)
             duty = 0;
 
-        ledc_set_duty(LEDC_HIGH_SPEED_MODE, LEDC_CHANNEL_0, duty);
-        ledc_update_duty(LEDC_HIGH_SPEED_MODE, LEDC_CHANNEL_0);
+        ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, duty);
+        ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
 
-        ledc_set_duty(LEDC_HIGH_SPEED_MODE, LEDC_CHANNEL_1, duty);
-        ledc_update_duty(LEDC_HIGH_SPEED_MODE, LEDC_CHANNEL_1);
+        ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_1, duty);
+        ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_1);
     }
 }
 
@@ -365,7 +365,7 @@ void adc_task(void *arg)
         else
             data.voltage = 0;
 
-        xQueueSend(adc_queue, &data, portMAX_DELAY);
+        xQueueOverwrite(adc_queue, &data);
     }
 }
 
@@ -512,7 +512,7 @@ void app_main(void)
 
     timer_evt_queue = xQueueCreate(10, sizeof(timer_event_t));
     pwm_evt_queue = xQueueCreate(10, sizeof(PWM_elements_t));
-    adc_queue = xQueueCreate(10, sizeof(adc_data_t));
+    adc_queue = xQueueCreate(1, sizeof(adc_data_t));
     mqtt_pwm_queue = xQueueCreate(5, sizeof(int));
 
      mqtt_app_start();
