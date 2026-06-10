@@ -4,7 +4,7 @@
  * Sistemas Embarcados
  * 
  * Autor: Pedro Henrique Silva dos Santos
- * Data: 03/06/2026
+ * Data: 10/06/2026
  * Versão: 0.7.0
  *
  * Features:
