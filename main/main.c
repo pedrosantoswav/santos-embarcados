@@ -67,31 +67,165 @@
 
 #include "mqtt_client.h"
 
+// ================== DISPLAY ===================
+
+static const char *TAG = "example";
+
+#define I2C_BUS_PORT  0
+
+// Display Spec
+
+#define EXAMPLE_LCD_PIXEL_CLOCK_HZ    (400 * 1000)
+#define EXAMPLE_PIN_NUM_SDA           19
+#define EXAMPLE_PIN_NUM_SCL           18
+#define EXAMPLE_PIN_NUM_RST           -1
+#define EXAMPLE_I2C_HW_ADDR           0x3C
+
+// The pixel number in horizontal and vertical
+
+#define EXAMPLE_LCD_H_RES              128
+#define EXAMPLE_LCD_V_RES              CONFIG_EXAMPLE_SSD1306_HEIGHT
+
+// Bit number used to represent command and parameter
+#define EXAMPLE_LCD_CMD_BITS           8
+#define EXAMPLE_LCD_PARAM_BITS         8
+
+#define EXAMPLE_LVGL_TICK_PERIOD_MS    5
+#define EXAMPLE_LVGL_TASK_STACK_SIZE   (4 * 1024)
+#define EXAMPLE_LVGL_TASK_PRIORITY     2
+#define EXAMPLE_LVGL_PALETTE_SIZE      8
+#define EXAMPLE_LVGL_TASK_MAX_DELAY_MS 500
+#define EXAMPLE_LVGL_TASK_MIN_DELAY_MS 1000 / CONFIG_FREERTOS_HZ
+
+// To use LV_COLOR_FORMAT_I1, we need an extra buffer to hold the converted data
+static uint8_t oled_buffer[EXAMPLE_LCD_H_RES * EXAMPLE_LCD_V_RES / 8];
+// LVGL library is not thread-safe, this example will call LVGL APIs from different tasks, so use a mutex to protect it
+static _lock_t lvgl_api_lock;
+
+static lv_obj_t *label_title;
+static lv_obj_t *label_voltage;
+static lv_obj_t *label_time;
+
+void example_lvgl_demo_ui(lv_display_t *disp)
+{
+    lv_obj_t *screen = lv_display_get_screen_active(disp);
+
+    label_title = lv_label_create(screen);
+    label_voltage = lv_label_create(screen);
+    label_time = lv_label_create(screen);
+
+    lv_label_set_text(label_title, "P6 - Pedro Santos");
+    lv_obj_align(label_title, LV_ALIGN_TOP_MID, 0, 0);
+
+    lv_label_set_text(label_voltage, "0 mV");
+    lv_obj_align(label_voltage, LV_ALIGN_CENTER, 0, 0);
+
+    lv_label_set_text(label_time, "00:00:00");
+    lv_obj_align(label_time, LV_ALIGN_BOTTOM_MID, 0, 0);
+}
+
+static bool example_notify_lvgl_flush_ready(esp_lcd_panel_io_handle_t io_panel, esp_lcd_panel_io_event_data_t *edata, void *user_ctx)
+{
+    lv_display_t *disp = (lv_display_t *)user_ctx;
+    lv_display_flush_ready(disp);
+    return false;
+}
+
+static void example_lvgl_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map)
+{
+    esp_lcd_panel_handle_t panel_handle = lv_display_get_user_data(disp);
+
+    // This is necessary because LVGL reserves 2 x 4 bytes in the buffer, as these are assumed to be used as a palette. Skip the palette here
+    // More information about the monochrome, please refer to https://docs.lvgl.io/9.2/porting/display.html#monochrome-displays
+    px_map += EXAMPLE_LVGL_PALETTE_SIZE;
+
+    uint16_t hor_res = lv_display_get_physical_horizontal_resolution(disp);
+    int x1 = area->x1;
+    int x2 = area->x2;
+    int y1 = area->y1;
+    int y2 = area->y2;
+
+    for (int y = y1; y <= y2; y++) {
+        for (int x = x1; x <= x2; x++) {
+            /* The order of bits is MSB first
+                        MSB           LSB
+               bits      7 6 5 4 3 2 1 0
+               pixels    0 1 2 3 4 5 6 7
+                        Left         Right
+            */
+            bool chroma_color = (px_map[(hor_res >> 3) * y  + (x >> 3)] & 1 << (7 - x % 8));
+
+            /* Write to the buffer as required for the display.
+            * It writes only 1-bit for monochrome displays mapped vertically.*/
+            uint8_t *buf = oled_buffer + hor_res * (y >> 3) + (x);
+            if (chroma_color) {
+                (*buf) &= ~(1 << (y % 8));
+            } else {
+                (*buf) |= (1 << (y % 8));
+            }
+        }
+    }
+    // pass the draw buffer to the driver
+    esp_lcd_panel_draw_bitmap(panel_handle, x1, y1, x2 + 1, y2 + 1, oled_buffer);
+}
+
+static void example_increase_lvgl_tick(void *arg)
+{
+    /* Tell LVGL how many milliseconds has elapsed */
+    lv_tick_inc(EXAMPLE_LVGL_TICK_PERIOD_MS);
+}
+
+static void example_lvgl_port_task(void *arg)
+{
+    ESP_LOGI(TAG, "Starting LVGL task");
+    uint32_t time_till_next_ms = 0;
+    while (1) {
+        _lock_acquire(&lvgl_api_lock);
+        time_till_next_ms = lv_timer_handler();
+        _lock_release(&lvgl_api_lock);
+        // in case of triggering a task watch dog time out
+        time_till_next_ms = MAX(time_till_next_ms, EXAMPLE_LVGL_TASK_MIN_DELAY_MS);
+        // in case of lvgl display not ready yet
+        time_till_next_ms = MIN(time_till_next_ms, EXAMPLE_LVGL_TASK_MAX_DELAY_MS);
+        usleep(1000 * time_till_next_ms);
+    }
+}
+
 // ================= DEFINIÇÕES =================
 
-/*#define B0 21
+#define B0 21
 #define B1 22
 #define B2 23
 #define B3 26
-#define GPIO_INPUT_PIN_SEL ((1ULL<<B0) | (1ULL<<B1) | (1ULL<<B2))*/
+#define GPIO_INPUT_PIN_SEL ((1ULL<<B0) | (1ULL<<B1) | (1ULL<<B2))
 
 #define PWM_LED_GPIO   16
 #define PWM_SCOPE_GPIO 33
 
+/*
+// LED (antigo)
+#define LED 2
+#define GPIO_OUTPUT_PIN_SEL (1ULL<<LED)
+*/
+
 // ================= TAGs =================
 
 static const char *TAG_SYS   = "SYS";
+static const char *TAG_GPIO  = "GPIO";
 static const char *TAG_TIMER = "TIMER";
 static const char *TAG_PWM   = "PWM";
 static const char *TAG_ADC   = "ADC";
+static const char *TAG_LCD   = "LCD";
+
 
 // ================= FILAS =================
 
-
+static QueueHandle_t gpio_evt_queue = NULL;
 static QueueHandle_t timer_evt_queue = NULL;
 static QueueHandle_t pwm_evt_queue = NULL;
 static QueueHandle_t adc_queue = NULL;
 static QueueHandle_t mqtt_pwm_queue = NULL;
+static QueueHandle_t lcd_queue = NULL;
 
 
 // ================= SEMÁFOROS =================
@@ -126,6 +260,8 @@ typedef struct {
     relogio_t relogio;
     int voltage;
 } lcd_data_t;
+
+// ================= MQTT ==================
 
 static const char *TAG_MQTT = "mqtt_example";
 
@@ -230,6 +366,14 @@ static void mqtt_app_start(void)
 
 // ================= ISR =================
 
+static void IRAM_ATTR gpio_isr_handler(void* arg)
+{
+    uint32_t gpio_num = (uint32_t) arg;
+    BaseType_t hp = pdFALSE;
+    xQueueSendFromISR(gpio_evt_queue, &gpio_num, &hp);
+    if (hp) portYIELD_FROM_ISR();
+}
+
 static bool IRAM_ATTR timer_callback(
     gptimer_handle_t timer,
     const gptimer_alarm_event_data_t *edata,
@@ -251,6 +395,113 @@ static bool IRAM_ATTR timer_callback(
     gptimer_set_alarm_action(timer, &alarm_config);
 
     return hp == pdTRUE;
+}
+
+// ========== TASK LED (antigo) ===========
+
+/*
+// LED
+static void led_control(void* arg)
+{
+
+    gpio_config_t io_conf;
+
+    // BOTÕES
+    io_conf.mode = GPIO_MODE_INPUT;
+    io_conf.pin_bit_mask = GPIO_INPUT_PIN_SEL;
+    io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
+    io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+    io_conf.intr_type = GPIO_INTR_NEGEDGE;
+    gpio_config(&io_conf);
+
+    // LED
+    io_conf.mode = GPIO_MODE_OUTPUT;
+    io_conf.pin_bit_mask = GPIO_OUTPUT_PIN_SEL;
+    io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
+    io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+    io_conf.intr_type = GPIO_INTR_DISABLE;
+    gpio_config(&io_conf);
+
+    uint32_t io_num;
+    int led_state = 0;
+
+    while (1)
+    {
+        if (xQueueReceive(gpio_evt_queue, &io_num, portMAX_DELAY))
+        {
+            int level = gpio_get_level(io_num);
+
+            ESP_LOGI(TAG_GPIO, "GPIO[%" PRIu32 "] pressionado | Nivel: %d", io_num, level);
+
+            // ===== CONTROLE DO LED =====
+
+            if (io_num == B0)
+            {
+                gpio_set_level(LED, 1);
+                led_state = 1;
+                ESP_LOGI(TAG_GPIO, "LED LIGADO (Botao 0)");
+            }
+            else if (io_num == B1)
+            {
+                gpio_set_level(LED, 0);
+                led_state = 0;
+                ESP_LOGI(TAG_GPIO, "LED DESLIGADO (Botao 1)");
+            }
+            else if (io_num == B2)
+            {
+                led_state = !led_state;
+                gpio_set_level(LED, led_state);
+
+                ESP_LOGW(TAG_GPIO,
+                "Atenção!!! Lógica do Botão 2 não possui debounce, sujeito a múltiplos acionamentos");
+
+                if(led_state == 1)
+                    ESP_LOGI(TAG_GPIO, "LED LIGADO (Botão 2)");
+                
+                else
+                    ESP_LOGI(TAG_GPIO, "LED DESLIGADO (Botão 2)");
+            }
+        }
+    }
+}*/
+
+// ================= TASK GPIO =================
+
+static void gpio_task(void* arg)
+{
+    gpio_config_t io_conf = {
+        .mode = GPIO_MODE_INPUT,
+        .pin_bit_mask = GPIO_INPUT_PIN_SEL,
+        .pull_up_en = GPIO_PULLUP_ENABLE,
+        .intr_type = GPIO_INTR_NEGEDGE
+    };
+    gpio_config(&io_conf);
+
+    uint32_t io_num;
+    PWM_elements_t msg;
+
+    while (1)
+    {
+        if (xQueueReceive(gpio_evt_queue, &io_num, portMAX_DELAY))
+        {
+            if (io_num == B0)
+            {
+                msg.automatico = true;
+                msg.incremento = 0;
+            }
+            else if (io_num == B1)
+            {
+                msg.automatico = false;
+                msg.incremento = 0;
+            }
+            else
+            {
+                msg.incremento = 300;
+            }
+
+            xQueueSend(pwm_evt_queue, &msg, portMAX_DELAY);
+        }
+    }
 }
 
 // ================= TASK PWM =================
@@ -302,7 +553,7 @@ void pwm_task(void *arg)
                     duty);
         }
 
-        /*if (xQueueReceive(pwm_evt_queue, &msg, 0))
+        if (xQueueReceive(pwm_evt_queue, &msg, 0))
         {
             if (msg.incremento == 0)
                 automatico = msg.automatico;
@@ -311,7 +562,7 @@ void pwm_task(void *arg)
         }
 
         if (automatico)
-            duty += 200;*/
+            duty += 200;
 
        if (duty > 8191)
             duty = 0;
@@ -441,10 +692,140 @@ void timer_task(void *arg)
                         "RAW: %d | Voltage: %d mV",
                         adc_data.raw, adc_data.voltage);
 
+                    lcd_data.relogio = relogio;
+                    lcd_data.voltage = adc_data.voltage;
+
+                    xQueueSend(lcd_queue, &lcd_data, 0);
+
                 }
             }
         }
     }
+}
+
+// ================= TASK DISPLAY ===============
+
+void display_task(void *arg)
+{
+
+    ESP_LOGI(TAG, "Initialize I2C bus");
+    i2c_master_bus_handle_t i2c_bus = NULL;
+    i2c_master_bus_config_t bus_config = {
+        .clk_source = I2C_CLK_SRC_DEFAULT,
+        .glitch_ignore_cnt = 7,
+        .i2c_port = I2C_BUS_PORT,
+        .sda_io_num = EXAMPLE_PIN_NUM_SDA,
+        .scl_io_num = EXAMPLE_PIN_NUM_SCL,
+        .flags.enable_internal_pullup = true,
+    };
+    ESP_ERROR_CHECK(i2c_new_master_bus(&bus_config, &i2c_bus));
+
+    ESP_LOGI(TAG, "Install panel IO");
+    esp_lcd_panel_io_handle_t io_handle = NULL;
+    esp_lcd_panel_io_i2c_config_t io_config = {
+        .dev_addr = EXAMPLE_I2C_HW_ADDR,
+        .scl_speed_hz = EXAMPLE_LCD_PIXEL_CLOCK_HZ,
+        .control_phase_bytes = 1,               // According to SSD1306 datasheet
+        .lcd_cmd_bits = EXAMPLE_LCD_CMD_BITS,   // According to SSD1306 datasheet
+        .lcd_param_bits = EXAMPLE_LCD_CMD_BITS, // According to SSD1306 datasheet
+        .dc_bit_offset = 6,                     // According to SSD1306 datasheet
+
+    };
+    ESP_ERROR_CHECK(esp_lcd_new_panel_io_i2c(i2c_bus, &io_config, &io_handle));
+
+    ESP_LOGI(TAG, "Install SSD1306 panel driver");
+    esp_lcd_panel_handle_t panel_handle = NULL;
+    esp_lcd_panel_dev_config_t panel_config = {
+        .bits_per_pixel = 1,
+        .reset_gpio_num = EXAMPLE_PIN_NUM_RST,
+    };
+
+    esp_lcd_panel_ssd1306_config_t ssd1306_config = {
+        .height = EXAMPLE_LCD_V_RES,
+    };
+    panel_config.vendor_config = &ssd1306_config;
+    
+    ESP_ERROR_CHECK(esp_lcd_new_panel_ssd1306(io_handle, &panel_config, &panel_handle));
+    ESP_ERROR_CHECK(esp_lcd_panel_reset(panel_handle));
+    ESP_ERROR_CHECK(esp_lcd_panel_init(panel_handle));
+    ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel_handle, true));
+
+    ESP_LOGI(TAG, "Initialize LVGL");
+    lv_init();
+    // create a lvgl display
+    lv_display_t *display = lv_display_create(EXAMPLE_LCD_H_RES, EXAMPLE_LCD_V_RES);
+    // associate the i2c panel handle to the display
+    lv_display_set_user_data(display, panel_handle);
+    // create draw buffer
+    void *buf = NULL;
+    ESP_LOGI(TAG, "Allocate separate LVGL draw buffers");
+    // LVGL reserves 2 x 4 bytes in the buffer, as these are assumed to be used as a palette.
+    size_t draw_buffer_sz = EXAMPLE_LCD_H_RES * EXAMPLE_LCD_V_RES / 8 + EXAMPLE_LVGL_PALETTE_SIZE;
+    buf = heap_caps_calloc(1, draw_buffer_sz, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    assert(buf);
+
+    // LVGL9 suooprt new monochromatic format.
+    lv_display_set_color_format(display, LV_COLOR_FORMAT_I1);
+    // initialize LVGL draw buffers
+    lv_display_set_buffers(display, buf, NULL, draw_buffer_sz, LV_DISPLAY_RENDER_MODE_FULL);
+    // set the callback which can copy the rendered image to an area of the display
+    lv_display_set_flush_cb(display, example_lvgl_flush_cb);
+
+    ESP_LOGI(TAG, "Register io panel event callback for LVGL flush ready notification");
+    const esp_lcd_panel_io_callbacks_t cbs = {
+        .on_color_trans_done = example_notify_lvgl_flush_ready,
+    };
+    /* Register done callback */
+    esp_lcd_panel_io_register_event_callbacks(io_handle, &cbs, display);
+
+    ESP_LOGI(TAG, "Use esp_timer as LVGL tick timer");
+    const esp_timer_create_args_t lvgl_tick_timer_args = {
+        .callback = &example_increase_lvgl_tick,
+        .name = "lvgl_tick"
+    };
+    esp_timer_handle_t lvgl_tick_timer = NULL;
+    ESP_ERROR_CHECK(esp_timer_create(&lvgl_tick_timer_args, &lvgl_tick_timer));
+    ESP_ERROR_CHECK(esp_timer_start_periodic(lvgl_tick_timer, EXAMPLE_LVGL_TICK_PERIOD_MS * 1000));
+
+    ESP_LOGI(TAG, "Create LVGL task");
+    xTaskCreate(example_lvgl_port_task, "LVGL", EXAMPLE_LVGL_TASK_STACK_SIZE, NULL, EXAMPLE_LVGL_TASK_PRIORITY, NULL);
+
+    ESP_LOGI(TAG, "Display LVGL Scroll Text");
+    // Lock the mutex due to the LVGL APIs are not thread-safe
+    _lock_acquire(&lvgl_api_lock);
+    example_lvgl_demo_ui(display);
+    _lock_release(&lvgl_api_lock);
+
+   lcd_data_t lcd_data;
+
+    while (1)
+    {
+        if (xQueueReceive(lcd_queue, &lcd_data, portMAX_DELAY))
+        {
+            char str_hora[16];
+            char str_tensao[32];
+
+            snprintf(str_hora,
+                    sizeof(str_hora),
+                    "%02lu:%02lu:%02lu",
+                    lcd_data.relogio.hora,
+                    lcd_data.relogio.minuto,
+                    lcd_data.relogio.segundo);
+
+            snprintf(str_tensao,
+                    sizeof(str_tensao),
+                    "%d mV",
+                    lcd_data.voltage);
+
+            _lock_acquire(&lvgl_api_lock);
+
+            lv_label_set_text(label_time, str_hora);
+            lv_label_set_text(label_voltage, str_tensao);
+
+            _lock_release(&lvgl_api_lock);
+        }
+    }
+
 }
 
 // ================= MAIN =================
@@ -487,11 +868,6 @@ void app_main(void)
 
     ESP_LOGI(TAG_SYS, "ESP-IDF: %s", esp_get_idf_version());
 
-    //MQTT
-/*
-    ESP_LOGI(TAG, "[APP] Startup..");
-    ESP_LOGI(TAG, "[APP] Free memory: %" PRIu32 " bytes", esp_get_free_heap_size());
-    ESP_LOGI(TAG, "[APP] IDF version: %s", esp_get_idf_version());*/
 
     esp_log_level_set("*", ESP_LOG_INFO);
     esp_log_level_set("mqtt_client", ESP_LOG_VERBOSE);
@@ -510,13 +886,15 @@ void app_main(void)
 
     //Filas
 
+    gpio_evt_queue = xQueueCreate(10, sizeof(uint32_t));
     timer_evt_queue = xQueueCreate(10, sizeof(timer_event_t));
     pwm_evt_queue = xQueueCreate(10, sizeof(PWM_elements_t));
     adc_queue = xQueueCreate(1, sizeof(adc_data_t));
+    lcd_queue = xQueueCreate(5, sizeof(lcd_data_t));
     mqtt_pwm_queue = xQueueCreate(5, sizeof(int));
 
-     mqtt_app_start();
-  
+    mqtt_app_start();
+
     //Semáforos
 
     semaphore_pwm = xSemaphoreCreateBinary();
@@ -524,8 +902,17 @@ void app_main(void)
 
     //Tasks
 
+    xTaskCreate(gpio_task, "gpio", 2048, NULL, 10, NULL);
     xTaskCreate(timer_task, "timer", 4096, NULL, 5, NULL);
     xTaskCreate(pwm_task, "pwm", 4096, NULL, 6, NULL);
     xTaskCreate(adc_task, "adc", 4096, NULL, 6, NULL);
+    xTaskCreate(display_task, "display", 4096, NULL, 4, NULL);
+
+    //ISR
+
+    gpio_install_isr_service(0);
+    gpio_isr_handler_add(B0, gpio_isr_handler, (void*) B0);
+    gpio_isr_handler_add(B1, gpio_isr_handler, (void*) B1);
+    gpio_isr_handler_add(B2, gpio_isr_handler, (void*) B2);
 
 }
