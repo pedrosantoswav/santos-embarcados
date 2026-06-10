@@ -199,7 +199,8 @@ static void example_lvgl_port_task(void *arg)
 #define B3 26
 #define GPIO_INPUT_PIN_SEL ((1ULL<<B0) | (1ULL<<B1) | (1ULL<<B2))
 
-#define PWM_LED_GPIO   16
+#define PWM_LED_GPIO   26
+#define PWM_LED_GPIO2  17
 #define PWM_SCOPE_GPIO 33
 
 /*
@@ -530,10 +531,19 @@ void pwm_task(void *arg)
         .timer_sel = LEDC_TIMER_0
     };
 
+        ledc_channel_config_t ch2 = {
+        .channel = LEDC_CHANNEL_2,
+        .gpio_num = PWM_LED_GPIO2,
+        .speed_mode = LEDC_LOW_SPEED_MODE,
+        .timer_sel = LEDC_TIMER_0
+    };
+
     ledc_channel_config(&ch0);
     ledc_channel_config(&ch1);
+    ledc_channel_config(&ch2);
 
     int duty = 0;
+    int duty2 = 0;
     int mqtt_duty;
 
     bool automatico = false;
@@ -545,12 +555,12 @@ void pwm_task(void *arg)
 
         if(xQueueReceive(mqtt_pwm_queue, &mqtt_duty, 0))
         {
-            duty = (mqtt_duty * 8191) / 100;
+            duty2 = (mqtt_duty * 8191) / 100;
             
             ESP_LOGI(TAG_PWM,
                     "MQTT=%d%% Duty=%d",
                     mqtt_duty,
-                    duty);
+                    duty2);
         }
 
         if (xQueueReceive(pwm_evt_queue, &msg, 0))
@@ -572,6 +582,10 @@ void pwm_task(void *arg)
 
         ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_1, duty);
         ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_1);
+
+        ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_2, duty2);
+        ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_2);
+        
     }
 }
 
