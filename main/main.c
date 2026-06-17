@@ -5,7 +5,7 @@
  * 
  * Autor: Pedro Henrique Silva dos Santos
  * Data: 10/06/2026
- * Versão: 0.7.1
+ * Versão: 1.0.0
  *
  * Features:
  * - Informações detalhadas do sistema
@@ -68,9 +68,94 @@
 
 #include "mqtt_client.h"
 
-// ================== DISPLAY ===================
+// ===================== DMX ====================
 
+#include "driver/uart.h"
+
+#define DMX_UART_PORT   UART_NUM_1
+#define DMX_TX_PIN      17
+
+#define DMX_BAUDRATE    250000
+
+uint8_t quadroDMX[513];
+
+// ================= DEFINIÇÕES =================
+
+#define B0 21
+#define B1 22
+#define B2 23
+#define B3 26
+#define GPIO_INPUT_PIN_SEL ((1ULL<<B0) | (1ULL<<B1) | (1ULL<<B2))
+
+#define PWM_LED_GPIO   26
+#define PWM_LED_GPIO2  17
+#define PWM_SCOPE_GPIO 33
+
+static uint16_t led_r = 0;
+static uint16_t led_g = 0;
+static uint16_t led_b = 0;
+static uint16_t led_w = 0;
+
+/*
+// LED (antigo)
+#define LED 2
+#define GPIO_OUTPUT_PIN_SEL (1ULL<<LED)
+*/
+
+// ================= TAGs =================
+
+static const char *TAG_SYS   = "SYS";
+static const char *TAG_GPIO  = "GPIO";
+static const char *TAG_TIMER = "TIMER";
+static const char *TAG_PWM   = "PWM";
+static const char *TAG_ADC   = "ADC";
+static const char *TAG_LCD   = "LCD";
+static const char *TAG_MQTT = "MQTT";
 static const char *TAG = "example";
+
+// ================= FILAS =================
+
+static QueueHandle_t gpio_evt_queue = NULL;
+static QueueHandle_t timer_evt_queue = NULL;
+static QueueHandle_t pwm_evt_queue = NULL;
+static QueueHandle_t adc_queue = NULL;
+static QueueHandle_t lcd_queue = NULL;
+static QueueHandle_t mqtt_dmx_queue = NULL;
+
+// ================= SEMÁFOROS =================
+
+static SemaphoreHandle_t semaphore_pwm = NULL;
+static SemaphoreHandle_t semaphore_adc = NULL;
+
+// ================= TIPOS =================
+
+typedef struct {
+    uint64_t count;
+    uint64_t alarm;
+} timer_event_t;
+
+typedef struct {
+    uint32_t hora;
+    uint32_t minuto;
+    uint32_t segundo;
+} relogio_t;
+
+typedef struct {
+    bool automatico;
+    int16_t incremento;
+} PWM_elements_t;
+
+typedef struct {
+    int raw;
+    int voltage;
+} adc_data_t;
+
+typedef struct {
+    relogio_t relogio;
+    int voltage;
+} lcd_data_t;
+
+// ================== DISPLAY ===================
 
 #define I2C_BUS_PORT  0
 
@@ -192,80 +277,7 @@ static void example_lvgl_port_task(void *arg)
     }
 }
 
-// ================= DEFINIÇÕES =================
-
-#define B0 21
-#define B1 22
-#define B2 23
-#define B3 26
-#define GPIO_INPUT_PIN_SEL ((1ULL<<B0) | (1ULL<<B1) | (1ULL<<B2))
-
-#define PWM_LED_GPIO   26
-#define PWM_LED_GPIO2  17
-#define PWM_SCOPE_GPIO 33
-
-/*
-// LED (antigo)
-#define LED 2
-#define GPIO_OUTPUT_PIN_SEL (1ULL<<LED)
-*/
-
-// ================= TAGs =================
-
-static const char *TAG_SYS   = "SYS";
-static const char *TAG_GPIO  = "GPIO";
-static const char *TAG_TIMER = "TIMER";
-static const char *TAG_PWM   = "PWM";
-static const char *TAG_ADC   = "ADC";
-static const char *TAG_LCD   = "LCD";
-
-
-// ================= FILAS =================
-
-static QueueHandle_t gpio_evt_queue = NULL;
-static QueueHandle_t timer_evt_queue = NULL;
-static QueueHandle_t pwm_evt_queue = NULL;
-static QueueHandle_t adc_queue = NULL;
-static QueueHandle_t mqtt_pwm_queue = NULL;
-static QueueHandle_t lcd_queue = NULL;
-
-
-// ================= SEMÁFOROS =================
-
-static SemaphoreHandle_t semaphore_pwm = NULL;
-static SemaphoreHandle_t semaphore_adc = NULL;
-
-// ================= TIPOS =================
-
-typedef struct {
-    uint64_t count;
-    uint64_t alarm;
-} timer_event_t;
-
-typedef struct {
-    uint32_t hora;
-    uint32_t minuto;
-    uint32_t segundo;
-} relogio_t;
-
-typedef struct {
-    bool automatico;
-    int16_t incremento;
-} PWM_elements_t;
-
-typedef struct {
-    int raw;
-    int voltage;
-} adc_data_t;
-
-typedef struct {
-    relogio_t relogio;
-    int voltage;
-} lcd_data_t;
-
 // ================= MQTT ==================
-
-static const char *TAG_MQTT = "mqtt_example";
 
 static void log_error_if_nonzero(const char *message, int error_code)
 {
@@ -285,7 +297,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
 
     case MQTT_EVENT_CONNECTED:
         ESP_LOGI(TAG_MQTT, "MQTT_EVENT_CONNECTED");
-        msg_id = esp_mqtt_client_subscribe(client, "setLED_value", 0);
+        msg_id = esp_mqtt_client_subscribe(client, "led/+", 0);
         ESP_LOGI(TAG_MQTT, "sent subscribe successful, msg_id=%d", msg_id);
         break;
 
@@ -295,7 +307,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
 
     case MQTT_EVENT_SUBSCRIBED:
         ESP_LOGI(TAG_MQTT, "MQTT_EVENT_SUBSCRIBED, msg_id=%d", event->msg_id);
-        msg_id = esp_mqtt_client_publish(client, "setLED_value", "data", 0, 0, 0);
+        msg_id = esp_mqtt_client_publish(client, "led/+", "data", 0, 0, 0);
         ESP_LOGI(TAG_MQTT, "sent publish successful, msg_id=%d", msg_id);
         break;
 
@@ -307,29 +319,52 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
         ESP_LOGI(TAG_MQTT, "MQTT_EVENT_PUBLISHED, msg_id=%d", event->msg_id);
         break;
 
-    case MQTT_EVENT_DATA:
+   case MQTT_EVENT_DATA:
     {
-        ESP_LOGI(TAG_MQTT, "MQTT_EVENT_DATA");
+        ESP_LOGI(TAG_MQTT, "EVENT_DATA");
 
+        char topic[32];
         char payload[16];
 
+        memset(topic, 0, sizeof(topic));
         memset(payload, 0, sizeof(payload));
+
+        memcpy(topic,
+            event->topic,
+            MIN(event->topic_len, sizeof(topic)-1));
 
         memcpy(payload,
             event->data,
             MIN(event->data_len, sizeof(payload)-1));
 
-        int duty = atoi(payload);
+        int value = atoi(payload);
 
-        if(duty < 0)
-            duty = 0;
+        if (value < 0)
+            value = 0;
 
-        if(duty > 8191)
-            duty = 8191;
+        if (value > 8191)
+            value = 8191;
 
-        xQueueSend(mqtt_pwm_queue, &duty, 0);
-
-        ESP_LOGI(TAG_MQTT, "PWM recebido via MQTT = %d", duty);
+        if (strcmp(topic, "led/r") == 0)
+        {
+            led_r = value;
+            ESP_LOGI(TAG_MQTT, "R = %d", led_r);
+        }
+        else if (strcmp(topic, "led/g") == 0)
+        {
+            led_g = value;
+            ESP_LOGI(TAG_MQTT, "G = %d", led_g);
+        }
+        else if (strcmp(topic, "led/b") == 0)
+        {
+            led_b = value;
+            ESP_LOGI(TAG_MQTT, "B = %d", led_b);
+        }
+        else if (strcmp(topic, "led/w") == 0)
+        {
+            led_w = value;
+            ESP_LOGI(TAG_MQTT, "W = %d", led_w);
+        }
 
         break;
     }
@@ -554,7 +589,7 @@ void pwm_task(void *arg)
     {
         xSemaphoreTake(semaphore_pwm, portMAX_DELAY);
 
-        if(xQueueReceive(mqtt_pwm_queue, &mqtt_duty, 0))
+        if(xQueueReceive(mqtt_dmx_queue, &mqtt_duty, 0))
         {
             duty2 = (mqtt_duty * 8191) / 100;
             
@@ -843,7 +878,29 @@ void display_task(void *arg)
 
 }
 
+// =================== TASK DMX ==================
 
+void dmx_task(void *arg)
+{
+    uart_config_t uart_config = {
+        .baud_rate = DMX_BAUDRATE,
+        .data_bits = UART_DATA_8_BITS,
+        .parity    = UART_PARITY_DISABLE,
+        .stop_bits = UART_STOP_BITS_2,
+        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE
+    };
+
+    uart_driver_install(DMX_UART_PORT, 0, 0, 0, NULL, 0);
+    uart_param_config(DMX_UART_PORT, &uart_config);
+
+    uart_set_pin(DMX_UART_PORT, DMX_TX_PIN, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+
+    while (1)
+    {
+        uart_write_bytes(DMX_UART_PORT, quadroDMX, 513);
+        vTaskDelay(pdMS_TO_TICKS(25));
+    }
+}
 
 // ================= MAIN =================
 
@@ -908,7 +965,7 @@ void app_main(void)
     pwm_evt_queue = xQueueCreate(10, sizeof(PWM_elements_t));
     adc_queue = xQueueCreate(1, sizeof(adc_data_t));
     lcd_queue = xQueueCreate(5, sizeof(lcd_data_t));
-    mqtt_pwm_queue = xQueueCreate(5, sizeof(int));
+    mqtt_dmx_queue = xQueueCreate(5, sizeof(int));
 
     mqtt_app_start();
 
@@ -924,6 +981,14 @@ void app_main(void)
     xTaskCreate(pwm_task, "pwm", 4096, NULL, 6, NULL);
     xTaskCreate(adc_task, "adc", 4096, NULL, 6, NULL);
     xTaskCreate(display_task, "display", 4096, NULL, 4, NULL);
+
+    quadroDMX[0] = 0x00;   // Start Code
+    quadroDMX[1] = 255;    // Canal 1
+    quadroDMX[2] = 0;      // Canal 2
+    quadroDMX[3] = 0;      // Canal 3
+    quadroDMX[4] = 0;      // Canal 4
+
+    //xTaskCreate(dmx_task, "dmx_task", 4096, NULL, 1, NULL);
 
     //ISR
 
