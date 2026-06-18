@@ -96,6 +96,11 @@ static uint16_t led_g = 0;
 static uint16_t led_b = 0;
 static uint16_t led_w = 0;
 
+uint8_t R = 0;
+uint8_t G = 0;
+uint8_t B = 0;
+uint8_t W = 0;
+
 /*
 // LED (antigo)
 #define LED 2
@@ -339,31 +344,58 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
 
         int value = atoi(payload);
 
-        if (value < 0)
-            value = 0;
+        if (strcmp(topic, "led/color") == 0)
+        {
+            ESP_LOGI(TAG_MQTT, "Cor recebida: %s", payload);
 
-        if (value > 8191)
-            value = 8191;
+            //memcpy para pegar os pares de valores hexadecimais que definem as cores R, G, B e W
+            memcpy(&led_r, payload, 4);
 
-        if (strcmp(topic, "led/r") == 0)
-        {
-            led_r = value;
-            ESP_LOGI(TAG_MQTT, "R = %d", led_r);
+            char temp[3];
+            temp[2] = '\0';
+
+            memcpy(temp, payload + 1, 2);
+            R = (uint8_t)strtol(temp, NULL, 16);
+
+            memcpy(temp, payload + 3, 2);
+            G = (uint8_t)strtol(temp, NULL, 16);
+
+            memcpy(temp, payload + 5, 2);
+            B = (uint8_t)strtol(temp, NULL, 16);
+
+            ESP_LOGI(TAG_MQTT, "R=%d, G=%d, B=%d", R, G, B);
+
         }
-        else if (strcmp(topic, "led/g") == 0)
+        
+        else
         {
-            led_g = value;
-            ESP_LOGI(TAG_MQTT, "G = %d", led_g);
-        }
-        else if (strcmp(topic, "led/b") == 0)
-        {
-            led_b = value;
-            ESP_LOGI(TAG_MQTT, "B = %d", led_b);
-        }
-        else if (strcmp(topic, "led/w") == 0)
-        {
-            led_w = value;
-            ESP_LOGI(TAG_MQTT, "W = %d", led_w);
+            int value = atoi(payload);
+
+            if (value < 0)
+                value = 0;
+            if (value > 8191)
+                value = 8191;
+
+            if (strcmp(topic, "led/r") == 0)
+            {
+                led_r = value;
+                ESP_LOGI(TAG_MQTT, "R = %d", led_r);
+            }
+            else if (strcmp(topic, "led/g") == 0)
+            {
+                led_g = value;
+                ESP_LOGI(TAG_MQTT, "G = %d", led_g);
+            }
+            else if (strcmp(topic, "led/b") == 0)
+            {
+                led_b = value;
+                ESP_LOGI(TAG_MQTT, "B = %d", led_b);
+            }
+            else if (strcmp(topic, "led/w") == 0)
+            {
+                led_w = value;
+                ESP_LOGI(TAG_MQTT, "W = %d", led_w);
+            }
         }
 
         break;
@@ -980,7 +1012,7 @@ void app_main(void)
     xTaskCreate(timer_task, "timer", 4096, NULL, 5, NULL);
     xTaskCreate(pwm_task, "pwm", 4096, NULL, 6, NULL);
     xTaskCreate(adc_task, "adc", 4096, NULL, 6, NULL);
-    xTaskCreate(display_task, "display", 4096, NULL, 4, NULL);
+    //xTaskCreate(display_task, "display", 4096, NULL, 4, NULL);
 
     quadroDMX[0] = 0x00;   // Start Code
     quadroDMX[1] = 255;    // Canal 1
