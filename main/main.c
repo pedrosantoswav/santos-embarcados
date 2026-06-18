@@ -67,6 +67,7 @@
 #include "protocol_examples_common.h"
 
 #include "mqtt_client.h"
+#include "rom/ets_sys.h"
 
 // ===================== DMX ====================
 
@@ -95,11 +96,6 @@ static uint16_t led_r = 0;
 static uint16_t led_g = 0;
 static uint16_t led_b = 0;
 static uint16_t led_w = 0;
-
-uint8_t R = 0;
-uint8_t G = 0;
-uint8_t B = 0;
-uint8_t W = 0;
 
 /*
 // LED (antigo)
@@ -346,58 +342,10 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
 
         if (strcmp(topic, "led/color") == 0)
         {
-            ESP_LOGI(TAG_MQTT, "Cor recebida: %s", payload);
-
-            //memcpy para pegar os pares de valores hexadecimais que definem as cores R, G, B e W
-            memcpy(&led_r, payload, 4);
-
-            char temp[3];
-            temp[2] = '\0';
-
-            memcpy(temp, payload + 1, 2);
-            R = (uint8_t)strtol(temp, NULL, 16);
-
-            memcpy(temp, payload + 3, 2);
-            G = (uint8_t)strtol(temp, NULL, 16);
-
-            memcpy(temp, payload + 5, 2);
-            B = (uint8_t)strtol(temp, NULL, 16);
-
-            ESP_LOGI(TAG_MQTT, "R=%d, G=%d, B=%d", R, G, B);
-
+            ESP_LOGI(TAG_MQTT, "Cor recebida: %s", payload);        
+            xQueueSend(mqtt_dmx_queue, &payload, 0);
         }
         
-        else
-        {
-            int value = atoi(payload);
-
-            if (value < 0)
-                value = 0;
-            if (value > 8191)
-                value = 8191;
-
-            if (strcmp(topic, "led/r") == 0)
-            {
-                led_r = value;
-                ESP_LOGI(TAG_MQTT, "R = %d", led_r);
-            }
-            else if (strcmp(topic, "led/g") == 0)
-            {
-                led_g = value;
-                ESP_LOGI(TAG_MQTT, "G = %d", led_g);
-            }
-            else if (strcmp(topic, "led/b") == 0)
-            {
-                led_b = value;
-                ESP_LOGI(TAG_MQTT, "B = %d", led_b);
-            }
-            else if (strcmp(topic, "led/w") == 0)
-            {
-                led_w = value;
-                ESP_LOGI(TAG_MQTT, "W = %d", led_w);
-            }
-        }
-
         break;
     }
 
@@ -912,6 +860,33 @@ void display_task(void *arg)
 
 // =================== TASK DMX ==================
 
+#include "esp_check.h"
+#include "esp_rom_sys.h"
+
+static void dmx_send_break(void)
+{
+    uart_wait_tx_done(DMX_UART_PORT, portMAX_DELAY);
+
+    // Desliga a UART do pino
+    gpio_reset_pin(DMX_TX_PIN);
+    gpio_set_direction(DMX_TX_PIN, GPIO_MODE_OUTPUT);
+
+    // BREAK (LOW)
+    gpio_set_level(DMX_TX_PIN, 0);
+    esp_rom_delay_us(100);
+
+    // MAB (HIGH)
+    gpio_set_level(DMX_TX_PIN, 1);
+    esp_rom_delay_us(12);
+
+    // Liga novamente a UART ao pino
+    uart_set_pin(DMX_UART_PORT,
+                 DMX_TX_PIN,
+                 UART_PIN_NO_CHANGE,
+                 UART_PIN_NO_CHANGE,
+                 UART_PIN_NO_CHANGE);
+}
+
 void dmx_task(void *arg)
 {
     uart_config_t uart_config = {
@@ -919,21 +894,78 @@ void dmx_task(void *arg)
         .data_bits = UART_DATA_8_BITS,
         .parity    = UART_PARITY_DISABLE,
         .stop_bits = UART_STOP_BITS_2,
-        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE
+        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
+        .source_clk = UART_SCLK_DEFAULT,
     };
 
-    uart_driver_install(DMX_UART_PORT, 0, 0, 0, NULL, 0);
-    uart_param_config(DMX_UART_PORT, &uart_config);
+    ESP_ERROR_CHECK(uart_driver_install(DMX_UART_PORT, 1024, 0, 0, NULL, 0));
 
-    uart_set_pin(DMX_UART_PORT, DMX_TX_PIN, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+    ESP_ERROR_CHECK(uart_param_config(DMX_UART_PORT, &uart_config));
+
+    ESP_ERROR_CHECK(uart_set_pin(DMX_UART_PORT,
+                                 DMX_TX_PIN,
+                                 UART_PIN_NO_CHANGE,
+                                 UART_PIN_NO_CHANGE,
+                                 UART_PIN_NO_CHANGE));
+
+    ESP_ERROR_CHECK(uart_flush(DMX_UART_PORT));
+
+    memset(quadroDMX, 0, sizeof(quadroDMX));
+/*
+    quadroDMX[0] = 0x00;    // Start Code
+    quadroDMX[1] = 0;     // Canal 1
+    quadroDMX[2] = 0;
+    quadroDMX[3] = 0;
+    quadroDMX[4] = 127;*/
 
     while (1)
     {
-        uart_write_bytes(DMX_UART_PORT, quadroDMX, 513);
-        vTaskDelay(pdMS_TO_TICKS(25));
+        char payload[16];
+    
+        if(xQueueReceive(mqtt_dmx_queue, &payload, 0))
+        {
+
+            uint8_t R;
+            uint8_t G;
+            uint8_t B;
+            uint8_t W;
+
+            char temp[3];
+            temp[2] = '\0';
+
+            memcpy(temp, payload + 1, 2);
+            R = (uint8_t)strtol(temp, NULL, 16);
+
+            memcpy(temp, payload + 3, 2);
+            G = (uint8_t)strtol(temp, NULL, 16);
+
+            memcpy(temp, payload + 5, 2);
+            B = (uint8_t)strtol(temp, NULL, 16);
+
+            ESP_LOGI(TAG_MQTT, "R=%d, G=%d, B=%d", R, G, B);
+
+            quadroDMX[1] = R;     // Canal 1
+            quadroDMX[2] = G;
+            quadroDMX[3] = B;
+            quadroDMX[4] = 0;
+            
+        }
+        
+        // 1. Gera o BREAK
+        dmx_send_break();
+
+        // 2. Envia o quadro DMX
+        uart_write_bytes(DMX_UART_PORT,
+                        (const char *)quadroDMX,
+                        sizeof(quadroDMX));
+
+        // 3. Espera terminar
+        uart_wait_tx_done(DMX_UART_PORT, portMAX_DELAY);
+
+        // 4. Aguarda até o próximo quadro
+        vTaskDelay(pdMS_TO_TICKS(25));   // ~40 quadros/s
     }
 }
-
 // ================= MAIN =================
 
 void app_main(void)
@@ -997,7 +1029,7 @@ void app_main(void)
     pwm_evt_queue = xQueueCreate(10, sizeof(PWM_elements_t));
     adc_queue = xQueueCreate(1, sizeof(adc_data_t));
     lcd_queue = xQueueCreate(5, sizeof(lcd_data_t));
-    mqtt_dmx_queue = xQueueCreate(5, sizeof(int));
+    mqtt_dmx_queue = xQueueCreate(8, sizeof(char[16]));
 
     mqtt_app_start();
 
@@ -1009,18 +1041,12 @@ void app_main(void)
     //Tasks
 
     xTaskCreate(gpio_task, "gpio", 2048, NULL, 10, NULL);
-    xTaskCreate(timer_task, "timer", 4096, NULL, 5, NULL);
-    xTaskCreate(pwm_task, "pwm", 4096, NULL, 6, NULL);
-    xTaskCreate(adc_task, "adc", 4096, NULL, 6, NULL);
+    //xTaskCreate(timer_task, "timer", 4096, NULL, 5, NULL);
+    //xTaskCreate(pwm_task, "pwm", 4096, NULL, 6, NULL);
+    //xTaskCreate(adc_task, "adc", 4096, NULL, 6, NULL);
     //xTaskCreate(display_task, "display", 4096, NULL, 4, NULL);
 
-    quadroDMX[0] = 0x00;   // Start Code
-    quadroDMX[1] = 255;    // Canal 1
-    quadroDMX[2] = 0;      // Canal 2
-    quadroDMX[3] = 0;      // Canal 3
-    quadroDMX[4] = 0;      // Canal 4
-
-    //xTaskCreate(dmx_task, "dmx_task", 4096, NULL, 1, NULL);
+    xTaskCreate(dmx_task, "dmx_task", 4096, NULL, 1, NULL);
 
     //ISR
 
