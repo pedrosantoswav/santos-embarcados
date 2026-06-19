@@ -156,6 +156,17 @@ typedef struct {
     int voltage;
 } lcd_data_t;
 
+typedef struct {
+    uint8_t R;
+    uint8_t G;
+    uint8_t B;
+    uint8_t W;
+    uint8_t stroboMode;
+    uint8_t BPM;
+} dmx_data_t;
+
+dmx_data_t dmx_data;
+
 // ================== DISPLAY ===================
 
 #define I2C_BUS_PORT  0
@@ -342,10 +353,68 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
 
         if (strcmp(topic, "led/color") == 0)
         {
-            ESP_LOGI(TAG_MQTT, "Cor recebida: %s", payload);        
-            xQueueSend(mqtt_dmx_queue, &payload, 0);
+            ESP_LOGI(TAG_MQTT, "Cor recebida: %s", payload);  
+            
+            char temp[3];
+            temp[2] = '\0';
+
+            memcpy(temp, payload + 1, 2);
+            dmx_data.R = (uint8_t)strtol(temp, NULL, 16);
+
+            memcpy(temp, payload + 3, 2);
+            dmx_data.G = (uint8_t)strtol(temp, NULL, 16);
+
+            memcpy(temp, payload + 5, 2);
+            dmx_data.B = (uint8_t)strtol(temp, NULL, 16);
+
+            if (dmx_data.R < dmx_data.G && dmx_data.R < dmx_data.B)
+                dmx_data.W = dmx_data.R;
+            else if (dmx_data.G < dmx_data.R && dmx_data.G < dmx_data.B)
+                dmx_data.W = dmx_data.G;
+            else
+                dmx_data.W = dmx_data.B;
+
+            dmx_data.R = dmx_data.R - dmx_data.W;
+            dmx_data.G = dmx_data.G - dmx_data.W;
+            dmx_data.B = dmx_data.B - dmx_data.W;
+
+            ESP_LOGI(TAG_MQTT, "R=%d, G=%d, B=%d, W=%d", dmx_data.R, dmx_data.G, dmx_data.B, dmx_data.W);
+            xQueueSend(mqtt_dmx_queue, &dmx_data, 0);
         }
-        
+
+        else if (strcmp(topic, "led/strobo") == 0)
+        {
+            dmx_data.stroboMode = atoi(payload);
+
+            if (dmx_data.stroboMode <= 0)
+            {
+                dmx_data.stroboMode = 0;
+                ESP_LOGI(TAG_MQTT, "Modo Strobo desativado");
+            }
+            
+            else
+            {
+                dmx_data.stroboMode = 1;
+                ESP_LOGI(TAG_MQTT, "Modo Strobo ativado");
+            }
+
+            ESP_LOGI(TAG_MQTT, "R=%d, G=%d, B=%d, W=%d", dmx_data.R, dmx_data.G, dmx_data.B, dmx_data.W);
+            xQueueSend(mqtt_dmx_queue, &dmx_data, 0); 
+        }
+
+        else if (strcmp(topic, "led/bpm") == 0)
+        {
+            dmx_data.BPM = atoi(payload);
+
+            if (dmx_data.BPM <= 0)
+                dmx_data.BPM = 0;
+            
+            ESP_LOGI(TAG_MQTT, "BPM: %d", dmx_data.BPM);
+
+            ESP_LOGI(TAG_MQTT, "R=%d, G=%d, B=%d, W=%d", dmx_data.R, dmx_data.G, dmx_data.B, dmx_data.W);
+            xQueueSend(mqtt_dmx_queue, &dmx_data, 0); 
+        }
+
         break;
     }
 
@@ -362,6 +431,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
     default:
         ESP_LOGI(TAG_MQTT, "Other event id:%d", event->event_id);
         break;
+
     }
 }
 
@@ -889,6 +959,7 @@ static void dmx_send_break(void)
 
 void dmx_task(void *arg)
 {
+
     uart_config_t uart_config = {
         .baud_rate = DMX_BAUDRATE,
         .data_bits = UART_DATA_8_BITS,
@@ -911,44 +982,32 @@ void dmx_task(void *arg)
     ESP_ERROR_CHECK(uart_flush(DMX_UART_PORT));
 
     memset(quadroDMX, 0, sizeof(quadroDMX));
-/*
-    quadroDMX[0] = 0x00;    // Start Code
-    quadroDMX[1] = 0;     // Canal 1
-    quadroDMX[2] = 0;
-    quadroDMX[3] = 0;
-    quadroDMX[4] = 127;*/
 
     while (1)
     {
         char payload[16];
     
-        if(xQueueReceive(mqtt_dmx_queue, &payload, 0))
+        if(xQueueReceive(mqtt_dmx_queue, &dmx_data, 0))
         {
 
-            uint8_t R;
-            uint8_t G;
-            uint8_t B;
-            uint8_t W;
+            static bool strobo_on = true;
+            static TickType_t last_toggle = 0;
 
-            char temp[3];
-            temp[2] = '\0';
+            ESP_LOGI(TAG_MQTT, "DMX data received. R=%d, G=%d, B=%d, W=%d, StroboMode=%d, BPM=%d",
+                dmx_data.R, dmx_data.G, dmx_data.B, dmx_data.W, dmx_data.stroboMode, dmx_data.BPM);
 
-            memcpy(temp, payload + 1, 2);
-            R = (uint8_t)strtol(temp, NULL, 16);
+            if (dmx_data.stroboMode == 1)
+            {
+  
+            }
 
-            memcpy(temp, payload + 3, 2);
-            G = (uint8_t)strtol(temp, NULL, 16);
-
-            memcpy(temp, payload + 5, 2);
-            B = (uint8_t)strtol(temp, NULL, 16);
-
-            ESP_LOGI(TAG_MQTT, "R=%d, G=%d, B=%d", R, G, B);
-
-            quadroDMX[1] = R;     // Canal 1
-            quadroDMX[2] = G;
-            quadroDMX[3] = B;
-            quadroDMX[4] = 0;
-            
+            else
+            {
+                quadroDMX[1] = dmx_data.R;
+                quadroDMX[2] = dmx_data.G;
+                quadroDMX[3] = dmx_data.B;
+                quadroDMX[4] = dmx_data.W;
+            }
         }
         
         // 1. Gera o BREAK
@@ -1029,7 +1088,7 @@ void app_main(void)
     pwm_evt_queue = xQueueCreate(10, sizeof(PWM_elements_t));
     adc_queue = xQueueCreate(1, sizeof(adc_data_t));
     lcd_queue = xQueueCreate(5, sizeof(lcd_data_t));
-    mqtt_dmx_queue = xQueueCreate(8, sizeof(char[16]));
+    mqtt_dmx_queue = xQueueCreate(8, sizeof(dmx_data_t));
 
     mqtt_app_start();
 
@@ -1040,7 +1099,7 @@ void app_main(void)
 
     //Tasks
 
-    xTaskCreate(gpio_task, "gpio", 2048, NULL, 10, NULL);
+    //xTaskCreate(gpio_task, "gpio", 2048, NULL, 10, NULL);
     //xTaskCreate(timer_task, "timer", 4096, NULL, 5, NULL);
     //xTaskCreate(pwm_task, "pwm", 4096, NULL, 6, NULL);
     //xTaskCreate(adc_task, "adc", 4096, NULL, 6, NULL);
@@ -1049,10 +1108,11 @@ void app_main(void)
     xTaskCreate(dmx_task, "dmx_task", 4096, NULL, 1, NULL);
 
     //ISR
-
+    /*
     gpio_install_isr_service(0);
     gpio_isr_handler_add(B0, gpio_isr_handler, (void*) B0);
     gpio_isr_handler_add(B1, gpio_isr_handler, (void*) B1);
     gpio_isr_handler_add(B2, gpio_isr_handler, (void*) B2);
+    */
 
 }
