@@ -892,6 +892,8 @@ void dmx_task(void *arg)
     uint32_t k = 0;
     uint32_t kfixo = 0;
 
+     bool estado = 0;
+
     while (1)
     {
         xSemaphoreTake(semaphore_dmx, portMAX_DELAY);
@@ -922,12 +924,14 @@ void dmx_task(void *arg)
         {
 
             int bpmConvertido = 60000 / dmx_data.BPM;
-
-            bool estado = 0;
+            
+           
 
             if ((k % bpmConvertido) == 0)
             {
+                printf("bpm: %d | dmx: %d\n", bpmConvertido, dmx_data.BPM);
                 kfixo = k;
+                estado = 1;
                 quadroDMX[1] = dmx_data.R;
                 quadroDMX[2] = dmx_data.G;
                 quadroDMX[3] = dmx_data.B;
@@ -936,7 +940,7 @@ void dmx_task(void *arg)
 
             else if (k == kfixo + 100)
             {
-
+                estado = 1;
                 quadroDMX[1] = 0;
                 quadroDMX[2] = 0;
                 quadroDMX[3] = 0;
@@ -944,8 +948,9 @@ void dmx_task(void *arg)
             }
         }
 
-        if ((k % 25) == 0)
+        if ((k % 25) == 0 || (estado == 1))
         {
+            estado = 0;
             // 1. Gera o BREAK
             dmx_send_break();
 
