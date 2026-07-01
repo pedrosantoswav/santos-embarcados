@@ -397,9 +397,6 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
                 dmx_data.stroboMode = 1;
                 ESP_LOGI(TAG_MQTT, "Modo Strobo ativado");
             }
-
-            ESP_LOGI(TAG_MQTT, "R=%d, G=%d, B=%d, W=%d", dmx_data.R, dmx_data.G, dmx_data.B, dmx_data.W);
-            xQueueSend(mqtt_dmx_queue, &dmx_data, 0); 
         }
 
         else if (strcmp(topic, "led/bpm") == 0)
@@ -410,10 +407,10 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
                 dmx_data.BPM = 0;
             
             ESP_LOGI(TAG_MQTT, "BPM: %d", dmx_data.BPM);
-
-            ESP_LOGI(TAG_MQTT, "R=%d, G=%d, B=%d, W=%d", dmx_data.R, dmx_data.G, dmx_data.B, dmx_data.W);
-            xQueueSend(mqtt_dmx_queue, &dmx_data, 0); 
         }
+
+        ESP_LOGI(TAG_MQTT, "R=%d, G=%d, B=%d, W=%d", dmx_data.R, dmx_data.G, dmx_data.B, dmx_data.W);
+        xQueueSend(mqtt_dmx_queue, &dmx_data, 0); 
 
         break;
     }
