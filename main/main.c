@@ -2,7 +2,7 @@
  * =========================================================
  * Projeto 7
  * Sistemas Embarcados
- * 
+ *
  * Autor: Pedro Henrique Silva dos Santos
  * Data: 10/06/2026
  * Versão: 1.0.0
@@ -10,43 +10,40 @@
  * Features:
  * - Informações detalhadas do sistema
  * - Relógio digital
- * - PWM automático/manual
- * - Leitura PWM através de ADC
  * - Display LCD com tensão e horário
  * - MQTT para LED
  * - (desativado) Controle de LED da placa via botões
- * 
+ *
  * =========================================================
  */
 
-#include <stdio.h>                  // Biblioteca padrão de entrada/saída
-#include <string.h>                 // Suporte às Strings
-#include <stdlib.h>                 // Alocacação de Memória
-#include <inttypes.h>               // Definições de tipos inteiros com tamanho fixo
-#include <stdbool.h>                // Suporte ao tipo booleano (true/false)
+#include <stdio.h>    // Biblioteca padrão de entrada/saída
+#include <string.h>   // Suporte às Strings
+#include <stdlib.h>   // Alocacação de Memória
+#include <inttypes.h> // Definições de tipos inteiros com tamanho fixo
+#include <stdbool.h>  // Suporte ao tipo booleano (true/false)
 
-#include "sdkconfig.h"              // Configurações do projeto ESP-IDF
+#include "sdkconfig.h" // Configurações do projeto ESP-IDF
 
-#include "freertos/FreeRTOS.h"      // Kernel do FreeRTOS
-#include "freertos/task.h"          // Manipulação de tarefas
-#include "freertos/queue.h"         // Filas
-#include "freertos/semphr.h"        // Semáforos
+#include "freertos/FreeRTOS.h" // Kernel do FreeRTOS
+#include "freertos/task.h"     // Manipulação de tarefas
+#include "freertos/queue.h"    // Filas
+#include "freertos/semphr.h"   // Semáforos
 
-#include "driver/gpio.h"            // Configurações pinos GPIO
-#include "driver/gptimer.h"         // Configurações TIMER
-#include "driver/ledc.h"            // Configurações PWM (LEDC)
+#include "driver/gpio.h"    // Configurações pinos GPIO
+#include "driver/gptimer.h" // Configurações TIMER
 
-#include "esp_chip_info.h"          // Informações sobre o chip ESP
-#include "esp_flash.h"              // Funções relacionadas à memória flash
-#include "esp_system.h"             // Funções gerais do sistema
-#include "esp_log.h"                // Sistema de logging (ESP_LOGI, ESP_LOGE, etc.)
-#include "esp_idf_version.h"        // Versão do ESP-IDF
+#include "esp_chip_info.h"   // Informações sobre o chip ESP
+#include "esp_flash.h"       // Funções relacionadas à memória flash
+#include "esp_system.h"      // Funções gerais do sistema
+#include "esp_log.h"         // Sistema de logging (ESP_LOGI, ESP_LOGE, etc.)
+#include "esp_idf_version.h" // Versão do ESP-IDF
 
-#include "esp_adc/adc_oneshot.h"    // ADC no modo "oneshot" (leitura sob demanda)
-#include "esp_adc/adc_cali.h"       // Calibração ADC
-#include "esp_adc/adc_cali_scheme.h"// Implementação de calibração (curve e line fitting)
+#include "esp_adc/adc_oneshot.h"     // ADC no modo "oneshot" (leitura sob demanda)
+#include "esp_adc/adc_cali.h"        // Calibração ADC
+#include "esp_adc/adc_cali_scheme.h" // Implementação de calibração (curve e line fitting)
 
-//Bibliotecas do exemplo I2C_OLED
+// Bibliotecas do exemplo I2C_OLED
 
 #include <sys/lock.h>
 #include <sys/param.h>
@@ -56,7 +53,7 @@
 #include "esp_err.h"
 #include "driver/i2c_master.h"
 #include "lvgl.h"
-#include <unistd.h> 
+#include <unistd.h>
 
 #include "esp_lcd_panel_vendor.h"
 
@@ -73,10 +70,10 @@
 
 #include "driver/uart.h"
 
-#define DMX_UART_PORT   UART_NUM_1
-#define DMX_TX_PIN      17
+#define DMX_UART_PORT UART_NUM_1
+#define DMX_TX_PIN 17
 
-#define DMX_BAUDRATE    250000
+#define DMX_BAUDRATE 250000
 
 uint8_t quadroDMX[513];
 
@@ -86,16 +83,14 @@ uint8_t quadroDMX[513];
 #define B1 22
 #define B2 23
 #define B3 26
-#define GPIO_INPUT_PIN_SEL ((1ULL<<B0) | (1ULL<<B1) | (1ULL<<B2))
-
-#define PWM_LED_GPIO   26
-#define PWM_LED_GPIO2  17
-#define PWM_SCOPE_GPIO 33
+#define GPIO_INPUT_PIN_SEL ((1ULL << B0) | (1ULL << B1) | (1ULL << B2))
 
 static uint16_t led_r = 0;
 static uint16_t led_g = 0;
 static uint16_t led_b = 0;
 static uint16_t led_w = 0;
+
+float bpmCount = 0;
 
 /*
 // LED (antigo)
@@ -105,12 +100,11 @@ static uint16_t led_w = 0;
 
 // ================= TAGs =================
 
-static const char *TAG_SYS   = "SYS";
-static const char *TAG_GPIO  = "GPIO";
+static const char *TAG_SYS = "SYS";
+static const char *TAG_GPIO = "GPIO";
 static const char *TAG_TIMER = "TIMER";
-static const char *TAG_PWM   = "PWM";
-static const char *TAG_ADC   = "ADC";
-static const char *TAG_LCD   = "LCD";
+static const char *TAG_ADC = "ADC";
+static const char *TAG_LCD = "LCD";
 static const char *TAG_MQTT = "MQTT";
 static const char *TAG = "example";
 
@@ -118,45 +112,44 @@ static const char *TAG = "example";
 
 static QueueHandle_t gpio_evt_queue = NULL;
 static QueueHandle_t timer_evt_queue = NULL;
-static QueueHandle_t pwm_evt_queue = NULL;
 static QueueHandle_t adc_queue = NULL;
 static QueueHandle_t lcd_queue = NULL;
 static QueueHandle_t mqtt_dmx_queue = NULL;
+static QueueHandle_t bpm_to_dmx_queue = NULL;
 
 // ================= SEMÁFOROS =================
 
-static SemaphoreHandle_t semaphore_pwm = NULL;
-static SemaphoreHandle_t semaphore_adc = NULL;
+static SemaphoreHandle_t semaphore_dmx = NULL;
 
 // ================= TIPOS =================
 
-typedef struct {
+typedef struct
+{
     uint64_t count;
     uint64_t alarm;
 } timer_event_t;
 
-typedef struct {
+typedef struct
+{
     uint32_t hora;
     uint32_t minuto;
     uint32_t segundo;
 } relogio_t;
 
-typedef struct {
-    bool automatico;
-    int16_t incremento;
-} PWM_elements_t;
-
-typedef struct {
+typedef struct
+{
     int raw;
     int voltage;
 } adc_data_t;
 
-typedef struct {
+typedef struct
+{
     relogio_t relogio;
     int voltage;
 } lcd_data_t;
 
-typedef struct {
+typedef struct
+{
     uint8_t R;
     uint8_t G;
     uint8_t B;
@@ -169,29 +162,29 @@ dmx_data_t dmx_data;
 
 // ================== DISPLAY ===================
 
-#define I2C_BUS_PORT  0
+#define I2C_BUS_PORT 0
 
 // Display Spec
 
-#define EXAMPLE_LCD_PIXEL_CLOCK_HZ    (400 * 1000)
-#define EXAMPLE_PIN_NUM_SDA           19
-#define EXAMPLE_PIN_NUM_SCL           18
-#define EXAMPLE_PIN_NUM_RST           -1
-#define EXAMPLE_I2C_HW_ADDR           0x3C
+#define EXAMPLE_LCD_PIXEL_CLOCK_HZ (400 * 1000)
+#define EXAMPLE_PIN_NUM_SDA 19
+#define EXAMPLE_PIN_NUM_SCL 18
+#define EXAMPLE_PIN_NUM_RST -1
+#define EXAMPLE_I2C_HW_ADDR 0x3C
 
 // The pixel number in horizontal and vertical
 
-#define EXAMPLE_LCD_H_RES              128
-#define EXAMPLE_LCD_V_RES              CONFIG_EXAMPLE_SSD1306_HEIGHT
+#define EXAMPLE_LCD_H_RES 128
+#define EXAMPLE_LCD_V_RES CONFIG_EXAMPLE_SSD1306_HEIGHT
 
 // Bit number used to represent command and parameter
-#define EXAMPLE_LCD_CMD_BITS           8
-#define EXAMPLE_LCD_PARAM_BITS         8
+#define EXAMPLE_LCD_CMD_BITS 8
+#define EXAMPLE_LCD_PARAM_BITS 8
 
-#define EXAMPLE_LVGL_TICK_PERIOD_MS    5
-#define EXAMPLE_LVGL_TASK_STACK_SIZE   (4 * 1024)
-#define EXAMPLE_LVGL_TASK_PRIORITY     2
-#define EXAMPLE_LVGL_PALETTE_SIZE      8
+#define EXAMPLE_LVGL_TICK_PERIOD_MS 5
+#define EXAMPLE_LVGL_TASK_STACK_SIZE (4 * 1024)
+#define EXAMPLE_LVGL_TASK_PRIORITY 2
+#define EXAMPLE_LVGL_PALETTE_SIZE 8
 #define EXAMPLE_LVGL_TASK_MAX_DELAY_MS 500
 #define EXAMPLE_LVGL_TASK_MIN_DELAY_MS 1000 / CONFIG_FREERTOS_HZ
 
@@ -243,22 +236,27 @@ static void example_lvgl_flush_cb(lv_display_t *disp, const lv_area_t *area, uin
     int y1 = area->y1;
     int y2 = area->y2;
 
-    for (int y = y1; y <= y2; y++) {
-        for (int x = x1; x <= x2; x++) {
+    for (int y = y1; y <= y2; y++)
+    {
+        for (int x = x1; x <= x2; x++)
+        {
             /* The order of bits is MSB first
                         MSB           LSB
                bits      7 6 5 4 3 2 1 0
                pixels    0 1 2 3 4 5 6 7
                         Left         Right
             */
-            bool chroma_color = (px_map[(hor_res >> 3) * y  + (x >> 3)] & 1 << (7 - x % 8));
+            bool chroma_color = (px_map[(hor_res >> 3) * y + (x >> 3)] & 1 << (7 - x % 8));
 
             /* Write to the buffer as required for the display.
-            * It writes only 1-bit for monochrome displays mapped vertically.*/
+             * It writes only 1-bit for monochrome displays mapped vertically.*/
             uint8_t *buf = oled_buffer + hor_res * (y >> 3) + (x);
-            if (chroma_color) {
+            if (chroma_color)
+            {
                 (*buf) &= ~(1 << (y % 8));
-            } else {
+            }
+            else
+            {
                 (*buf) |= (1 << (y % 8));
             }
         }
@@ -277,7 +275,8 @@ static void example_lvgl_port_task(void *arg)
 {
     ESP_LOGI(TAG, "Starting LVGL task");
     uint32_t time_till_next_ms = 0;
-    while (1) {
+    while (1)
+    {
         _lock_acquire(&lvgl_api_lock);
         time_till_next_ms = lv_timer_handler();
         _lock_release(&lvgl_api_lock);
@@ -293,7 +292,8 @@ static void example_lvgl_port_task(void *arg)
 
 static void log_error_if_nonzero(const char *message, int error_code)
 {
-    if (error_code != 0) {
+    if (error_code != 0)
+    {
         ESP_LOGE(TAG_MQTT, "Last error %s: 0x%x", message, error_code);
     }
 }
@@ -305,7 +305,8 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
     ESP_LOGD(TAG_MQTT, "Event dispatched from event loop base=%s, event_id=%" PRIi32 "", base, event_id);
     esp_mqtt_event_handle_t event = event_data;
     esp_mqtt_client_handle_t client = event->client;
-    switch ((esp_mqtt_event_id_t)event_id) {
+    switch ((esp_mqtt_event_id_t)event_id)
+    {
 
     case MQTT_EVENT_CONNECTED:
         ESP_LOGI(TAG_MQTT, "MQTT_EVENT_CONNECTED");
@@ -331,7 +332,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
         ESP_LOGI(TAG_MQTT, "MQTT_EVENT_PUBLISHED, msg_id=%d", event->msg_id);
         break;
 
-   case MQTT_EVENT_DATA:
+    case MQTT_EVENT_DATA:
     {
         ESP_LOGI(TAG_MQTT, "EVENT_DATA");
 
@@ -342,19 +343,19 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
         memset(payload, 0, sizeof(payload));
 
         memcpy(topic,
-            event->topic,
-            MIN(event->topic_len, sizeof(topic)-1));
+               event->topic,
+               MIN(event->topic_len, sizeof(topic) - 1));
 
         memcpy(payload,
-            event->data,
-            MIN(event->data_len, sizeof(payload)-1));
+               event->data,
+               MIN(event->data_len, sizeof(payload) - 1));
 
         int value = atoi(payload);
 
         if (strcmp(topic, "led/color") == 0)
         {
-            ESP_LOGI(TAG_MQTT, "Cor recebida: %s", payload);  
-            
+            ESP_LOGI(TAG_MQTT, "Cor recebida: %s", payload);
+
             char temp[3];
             temp[2] = '\0';
 
@@ -391,7 +392,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
                 dmx_data.stroboMode = 0;
                 ESP_LOGI(TAG_MQTT, "Modo Strobo desativado");
             }
-            
+
             else
             {
                 dmx_data.stroboMode = 1;
@@ -405,22 +406,23 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
 
             if (dmx_data.BPM <= 0)
                 dmx_data.BPM = 0;
-            
+
             ESP_LOGI(TAG_MQTT, "BPM: %d", dmx_data.BPM);
         }
 
         ESP_LOGI(TAG_MQTT, "R=%d, G=%d, B=%d, W=%d", dmx_data.R, dmx_data.G, dmx_data.B, dmx_data.W);
-        xQueueSend(mqtt_dmx_queue, &dmx_data, 0); 
+        xQueueSend(mqtt_dmx_queue, &dmx_data, 0);
 
         break;
     }
 
     case MQTT_EVENT_ERROR:
         ESP_LOGI(TAG_MQTT, "MQTT_EVENT_ERROR");
-        if (event->error_handle->error_type == MQTT_ERROR_TYPE_TCP_TRANSPORT) {
+        if (event->error_handle->error_type == MQTT_ERROR_TYPE_TCP_TRANSPORT)
+        {
             log_error_if_nonzero("reported from esp-tls", event->error_handle->esp_tls_last_esp_err);
             log_error_if_nonzero("reported from tls stack", event->error_handle->esp_tls_stack_err);
-            log_error_if_nonzero("captured as transport's socket errno",  event->error_handle->esp_transport_sock_errno);
+            log_error_if_nonzero("captured as transport's socket errno", event->error_handle->esp_transport_sock_errno);
             ESP_LOGI(TAG_MQTT, "Last errno string (%s)", strerror(event->error_handle->esp_transport_sock_errno));
         }
         break;
@@ -428,7 +430,6 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
     default:
         ESP_LOGI(TAG_MQTT, "Other event id:%d", event->event_id);
         break;
-
     }
 }
 
@@ -450,12 +451,13 @@ static void mqtt_app_start(void)
 
 // ================= ISR =================
 
-static void IRAM_ATTR gpio_isr_handler(void* arg)
+static void IRAM_ATTR gpio_isr_handler(void *arg)
 {
-    uint32_t gpio_num = (uint32_t) arg;
+    uint32_t gpio_num = (uint32_t)arg;
     BaseType_t hp = pdFALSE;
     xQueueSendFromISR(gpio_evt_queue, &gpio_num, &hp);
-    if (hp) portYIELD_FROM_ISR();
+    if (hp)
+        portYIELD_FROM_ISR();
 }
 
 static bool IRAM_ATTR timer_callback(
@@ -468,14 +470,12 @@ static bool IRAM_ATTR timer_callback(
 
     timer_event_t evt = {
         .count = edata->count_value,
-        .alarm = edata->alarm_value
-    };
+        .alarm = edata->alarm_value};
 
     xQueueSendFromISR(queue, &evt, &hp);
 
     gptimer_alarm_config_t alarm_config = {
-        .alarm_count = edata->alarm_value + 100000
-    };
+        .alarm_count = edata->alarm_value + 1000};
     gptimer_set_alarm_action(timer, &alarm_config);
 
     return hp == pdTRUE;
@@ -541,7 +541,7 @@ static void led_control(void* arg)
 
                 if(led_state == 1)
                     ESP_LOGI(TAG_GPIO, "LED LIGADO (Botão 2)");
-                
+
                 else
                     ESP_LOGI(TAG_GPIO, "LED DESLIGADO (Botão 2)");
             }
@@ -550,7 +550,7 @@ static void led_control(void* arg)
 }*/
 
 // ================= TASK GPIO =================
-
+/*
 static void gpio_task(void* arg)
 {
     gpio_config_t io_conf = {
@@ -562,7 +562,6 @@ static void gpio_task(void* arg)
     gpio_config(&io_conf);
 
     uint32_t io_num;
-    PWM_elements_t msg;
 
     while (1)
     {
@@ -583,98 +582,12 @@ static void gpio_task(void* arg)
                 msg.incremento = 300;
             }
 
-            xQueueSend(pwm_evt_queue, &msg, portMAX_DELAY);
         }
     }
-}
-
-// ================= TASK PWM =================
-
-void pwm_task(void *arg)
-{
-    ledc_timer_config_t timer = {
-        .speed_mode = LEDC_LOW_SPEED_MODE,
-        .timer_num = LEDC_TIMER_0,
-        .duty_resolution = LEDC_TIMER_13_BIT,
-        .freq_hz = 5000,
-    };
-    ledc_timer_config(&timer);
-
-    ledc_channel_config_t ch0 = {
-        .channel = LEDC_CHANNEL_0,
-        .gpio_num = PWM_LED_GPIO,
-        .speed_mode = LEDC_LOW_SPEED_MODE,
-        .timer_sel = LEDC_TIMER_0
-    };
-
-    ledc_channel_config_t ch1 = {
-        .channel = LEDC_CHANNEL_1,
-        .gpio_num = PWM_SCOPE_GPIO,
-        .speed_mode = LEDC_LOW_SPEED_MODE,
-        .timer_sel = LEDC_TIMER_0
-    };
-
-        ledc_channel_config_t ch2 = {
-        .channel = LEDC_CHANNEL_2,
-        .gpio_num = PWM_LED_GPIO2,
-        .speed_mode = LEDC_LOW_SPEED_MODE,
-        .timer_sel = LEDC_TIMER_0
-    };
-
-    ledc_channel_config(&ch0);
-    ledc_channel_config(&ch1);
-    ledc_channel_config(&ch2);
-
-    int duty = 0;
-    int duty2 = 0;
-    int mqtt_duty;
-
-    bool automatico = false;
-    PWM_elements_t msg;
-
-   while (1)
-    {
-        xSemaphoreTake(semaphore_pwm, portMAX_DELAY);
-
-        if(xQueueReceive(mqtt_dmx_queue, &mqtt_duty, 0))
-        {
-            duty2 = (mqtt_duty * 8191) / 100;
-            
-            ESP_LOGI(TAG_PWM,
-                    "MQTT=%d%% Duty=%d",
-                    mqtt_duty,
-                    duty2);
-        }
-
-        if (xQueueReceive(pwm_evt_queue, &msg, 0))
-        {
-            if (msg.incremento == 0)
-                automatico = msg.automatico;
-            else if (!automatico)
-                duty += msg.incremento;
-        }
-
-        if (automatico)
-            duty += 200;
-
-       if (duty > 8191)
-            duty = 0;
-
-        ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, duty);
-        ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
-
-        ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_1, duty);
-        ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_1);
-
-        ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_2, duty2);
-        ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_2);
-        
-    }
-}
-
+}*/
 
 // ================= TASK ADC =================
-
+/*
 void adc_task(void *arg)
 {
     adc_oneshot_unit_handle_t adc_handle;
@@ -715,7 +628,7 @@ void adc_task(void *arg)
 
         xQueueOverwrite(adc_queue, &data);
     }
-}
+}*/
 
 // ================= TASK TIMER =================
 
@@ -735,7 +648,7 @@ void timer_task(void *arg)
 
     gptimer_enable(timer);
 
-    gptimer_alarm_config_t alarm = {.alarm_count = 100000};
+    gptimer_alarm_config_t alarm = {.alarm_count = 1000};
     gptimer_set_alarm_action(timer, &alarm);
     gptimer_start(timer);
 
@@ -749,12 +662,11 @@ void timer_task(void *arg)
     {
         if (xQueueReceive(timer_evt_queue, &evt, portMAX_DELAY))
         {
-            xSemaphoreGive(semaphore_pwm);
-            xSemaphoreGive(semaphore_adc);
+            xSemaphoreGive(semaphore_dmx);
 
             count++;
 
-            if (count == 10)
+            if (count == 1000)
             {
                 count = 0;
                 relogio.segundo++;
@@ -772,28 +684,27 @@ void timer_task(void *arg)
                 }
 
                 ESP_LOGI(TAG_TIMER, "Hora: %02lu:%02lu:%02lu",
-                    relogio.hora, relogio.minuto, relogio.segundo);
+                         relogio.hora, relogio.minuto, relogio.segundo);
 
                 char str_hora[9]; // "HH:MM:SS" + '\0'
 
                 snprintf(str_hora,
-                    sizeof(str_hora),
-                    "%02lu:%02lu:%02lu",
-                    relogio.hora,
-                    relogio.minuto,
-                    relogio.segundo);
-                
+                         sizeof(str_hora),
+                         "%02lu:%02lu:%02lu",
+                         relogio.hora,
+                         relogio.minuto,
+                         relogio.segundo);
+
                 if (xQueueReceive(adc_queue, &adc_data, 0))
                 {
                     ESP_LOGI(TAG_ADC,
-                        "RAW: %d | Voltage: %d mV",
-                        adc_data.raw, adc_data.voltage);
+                             "RAW: %d | Voltage: %d mV",
+                             adc_data.raw, adc_data.voltage);
 
                     lcd_data.relogio = relogio;
                     lcd_data.voltage = adc_data.voltage;
 
                     xQueueSend(lcd_queue, &lcd_data, 0);
-
                 }
             }
         }
@@ -841,7 +752,7 @@ void display_task(void *arg)
         .height = EXAMPLE_LCD_V_RES,
     };
     panel_config.vendor_config = &ssd1306_config;
-    
+
     ESP_ERROR_CHECK(esp_lcd_new_panel_ssd1306(io_handle, &panel_config, &panel_handle));
     ESP_ERROR_CHECK(esp_lcd_panel_reset(panel_handle));
     ESP_ERROR_CHECK(esp_lcd_panel_init(panel_handle));
@@ -878,8 +789,7 @@ void display_task(void *arg)
     ESP_LOGI(TAG, "Use esp_timer as LVGL tick timer");
     const esp_timer_create_args_t lvgl_tick_timer_args = {
         .callback = &example_increase_lvgl_tick,
-        .name = "lvgl_tick"
-    };
+        .name = "lvgl_tick"};
     esp_timer_handle_t lvgl_tick_timer = NULL;
     ESP_ERROR_CHECK(esp_timer_create(&lvgl_tick_timer_args, &lvgl_tick_timer));
     ESP_ERROR_CHECK(esp_timer_start_periodic(lvgl_tick_timer, EXAMPLE_LVGL_TICK_PERIOD_MS * 1000));
@@ -893,7 +803,7 @@ void display_task(void *arg)
     example_lvgl_demo_ui(display);
     _lock_release(&lvgl_api_lock);
 
-   lcd_data_t lcd_data;
+    lcd_data_t lcd_data;
 
     while (1)
     {
@@ -903,16 +813,16 @@ void display_task(void *arg)
             char str_tensao[32];
 
             snprintf(str_hora,
-                    sizeof(str_hora),
-                    "%02lu:%02lu:%02lu",
-                    lcd_data.relogio.hora,
-                    lcd_data.relogio.minuto,
-                    lcd_data.relogio.segundo);
+                     sizeof(str_hora),
+                     "%02lu:%02lu:%02lu",
+                     lcd_data.relogio.hora,
+                     lcd_data.relogio.minuto,
+                     lcd_data.relogio.segundo);
 
             snprintf(str_tensao,
-                    sizeof(str_tensao),
-                    "%d mV",
-                    lcd_data.voltage);
+                     sizeof(str_tensao),
+                     "%d mV",
+                     lcd_data.voltage);
 
             _lock_acquire(&lvgl_api_lock);
 
@@ -922,7 +832,6 @@ void display_task(void *arg)
             _lock_release(&lvgl_api_lock);
         }
     }
-
 }
 
 // =================== TASK DMX ==================
@@ -960,7 +869,7 @@ void dmx_task(void *arg)
     uart_config_t uart_config = {
         .baud_rate = DMX_BAUDRATE,
         .data_bits = UART_DATA_8_BITS,
-        .parity    = UART_PARITY_DISABLE,
+        .parity = UART_PARITY_DISABLE,
         .stop_bits = UART_STOP_BITS_2,
         .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
         .source_clk = UART_SCLK_DEFAULT,
@@ -980,46 +889,77 @@ void dmx_task(void *arg)
 
     memset(quadroDMX, 0, sizeof(quadroDMX));
 
+    uint32_t k = 0;
+    uint32_t kfixo = 0;
+
     while (1)
     {
+        xSemaphoreTake(semaphore_dmx, portMAX_DELAY);
+
         char payload[16];
-    
-        if(xQueueReceive(mqtt_dmx_queue, &dmx_data, 0))
+
+        k = k + 1;
+
+        if (xQueueReceive(mqtt_dmx_queue, &dmx_data, 0))
         {
 
             static bool strobo_on = true;
             static TickType_t last_toggle = 0;
 
             ESP_LOGI(TAG_MQTT, "DMX data received. R=%d, G=%d, B=%d, W=%d, StroboMode=%d, BPM=%d",
-                dmx_data.R, dmx_data.G, dmx_data.B, dmx_data.W, dmx_data.stroboMode, dmx_data.BPM);
+                     dmx_data.R, dmx_data.G, dmx_data.B, dmx_data.W, dmx_data.stroboMode, dmx_data.BPM);
+        }
 
-            if (dmx_data.stroboMode == 1)
-            {
-  
-            }
+        if (dmx_data.stroboMode == 0)
+        {
+            quadroDMX[1] = dmx_data.R;
+            quadroDMX[2] = dmx_data.G;
+            quadroDMX[3] = dmx_data.B;
+            quadroDMX[4] = dmx_data.W;
+        }
 
-            else
+        else
+        {
+
+            int bpmConvertido = 60000 / dmx_data.BPM;
+
+            bool estado = 0;
+
+            if ((k % bpmConvertido) == 0)
             {
+                kfixo = k;
                 quadroDMX[1] = dmx_data.R;
                 quadroDMX[2] = dmx_data.G;
                 quadroDMX[3] = dmx_data.B;
                 quadroDMX[4] = dmx_data.W;
             }
+
+            else if (k == kfixo + 100)
+            {
+
+                quadroDMX[1] = 0;
+                quadroDMX[2] = 0;
+                quadroDMX[3] = 0;
+                quadroDMX[4] = 0;
+            }
         }
-        
-        // 1. Gera o BREAK
-        dmx_send_break();
 
-        // 2. Envia o quadro DMX
-        uart_write_bytes(DMX_UART_PORT,
-                        (const char *)quadroDMX,
-                        sizeof(quadroDMX));
+        if ((k % 25) == 0)
+        {
+            // 1. Gera o BREAK
+            dmx_send_break();
 
-        // 3. Espera terminar
-        uart_wait_tx_done(DMX_UART_PORT, portMAX_DELAY);
+            // 2. Envia o quadro DMX
+            uart_write_bytes(DMX_UART_PORT,
+                             (const char *)quadroDMX,
+                             sizeof(quadroDMX));
+
+            // 3. Espera terminar
+            uart_wait_tx_done(DMX_UART_PORT, portMAX_DELAY);
+        }
 
         // 4. Aguarda até o próximo quadro
-        vTaskDelay(pdMS_TO_TICKS(25));   // ~40 quadros/s
+        // vTaskDelay(pdMS_TO_TICKS(25));   // ~40 quadros/s
     }
 }
 // ================= MAIN =================
@@ -1043,13 +983,13 @@ void app_main(void)
     ESP_LOGI(TAG_SYS, "Nucleos: %d", chip_info.cores);
 
     ESP_LOGI(TAG_SYS, "WiFi: %s",
-        (chip_info.features & CHIP_FEATURE_WIFI_BGN) ? "SIM" : "NAO");
+             (chip_info.features & CHIP_FEATURE_WIFI_BGN) ? "SIM" : "NAO");
 
     ESP_LOGI(TAG_SYS, "Bluetooth: %s",
-        (chip_info.features & CHIP_FEATURE_BT) ? "SIM" : "NAO");
+             (chip_info.features & CHIP_FEATURE_BT) ? "SIM" : "NAO");
 
     ESP_LOGI(TAG_SYS, "BLE: %s",
-        (chip_info.features & CHIP_FEATURE_BLE) ? "SIM" : "NAO");
+             (chip_info.features & CHIP_FEATURE_BLE) ? "SIM" : "NAO");
 
     if (esp_flash_get_size(NULL, &flash_size) == ESP_OK)
     {
@@ -1061,7 +1001,6 @@ void app_main(void)
              esp_get_minimum_free_heap_size());
 
     ESP_LOGI(TAG_SYS, "ESP-IDF: %s", esp_get_idf_version());
-
 
     esp_log_level_set("*", ESP_LOG_INFO);
     esp_log_level_set("mqtt_client", ESP_LOG_VERBOSE);
@@ -1077,39 +1016,35 @@ void app_main(void)
 
     ESP_ERROR_CHECK(example_connect());
 
-
-    //Filas
+    // Filas
 
     gpio_evt_queue = xQueueCreate(10, sizeof(uint32_t));
     timer_evt_queue = xQueueCreate(10, sizeof(timer_event_t));
-    pwm_evt_queue = xQueueCreate(10, sizeof(PWM_elements_t));
     adc_queue = xQueueCreate(1, sizeof(adc_data_t));
     lcd_queue = xQueueCreate(5, sizeof(lcd_data_t));
     mqtt_dmx_queue = xQueueCreate(8, sizeof(dmx_data_t));
+    bpm_to_dmx_queue = xQueueCreate(8, sizeof(bool));
 
     mqtt_app_start();
 
-    //Semáforos
+    // Semáforos
 
-    semaphore_pwm = xSemaphoreCreateBinary();
-    semaphore_adc = xSemaphoreCreateBinary();
+    semaphore_dmx = xSemaphoreCreateBinary();
 
-    //Tasks
+    // Tasks
 
-    //xTaskCreate(gpio_task, "gpio", 2048, NULL, 10, NULL);
-    //xTaskCreate(timer_task, "timer", 4096, NULL, 5, NULL);
-    //xTaskCreate(pwm_task, "pwm", 4096, NULL, 6, NULL);
-    //xTaskCreate(adc_task, "adc", 4096, NULL, 6, NULL);
-    //xTaskCreate(display_task, "display", 4096, NULL, 4, NULL);
+    // xTaskCreate(gpio_task, "gpio", 2048, NULL, 10, NULL);
+    xTaskCreate(timer_task, "timer", 4096, NULL, 5, NULL);
+    // xTaskCreate(adc_task, "adc", 4096, NULL, 6, NULL);
+    // xTaskCreate(display_task, "display", 4096, NULL, 4, NULL);
 
     xTaskCreate(dmx_task, "dmx_task", 4096, NULL, 1, NULL);
 
-    //ISR
+    // ISR
     /*
     gpio_install_isr_service(0);
     gpio_isr_handler_add(B0, gpio_isr_handler, (void*) B0);
     gpio_isr_handler_add(B1, gpio_isr_handler, (void*) B1);
     gpio_isr_handler_add(B2, gpio_isr_handler, (void*) B2);
     */
-
 }
