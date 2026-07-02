@@ -475,7 +475,7 @@ static bool IRAM_ATTR timer_callback(
     xQueueSendFromISR(queue, &evt, &hp);
 
     gptimer_alarm_config_t alarm_config = {
-        .alarm_count = edata->alarm_value + 1000};
+        .alarm_count = edata->alarm_value + 10000};
     gptimer_set_alarm_action(timer, &alarm_config);
 
     return hp == pdTRUE;
@@ -648,7 +648,7 @@ void timer_task(void *arg)
 
     gptimer_enable(timer);
 
-    gptimer_alarm_config_t alarm = {.alarm_count = 1000};
+    gptimer_alarm_config_t alarm = {.alarm_count = 10000};
     gptimer_set_alarm_action(timer, &alarm);
     gptimer_start(timer);
 
@@ -666,7 +666,7 @@ void timer_task(void *arg)
 
             count++;
 
-            if (count == 1000)
+            if (count == 100)
             {
                 count = 0;
                 relogio.segundo++;
@@ -843,29 +843,21 @@ static void dmx_send_break(void)
 {
     uart_wait_tx_done(DMX_UART_PORT, portMAX_DELAY);
 
-    // Desliga a UART do pino
-    gpio_reset_pin(DMX_TX_PIN);
-    gpio_set_direction(DMX_TX_PIN, GPIO_MODE_OUTPUT);
+    // BREAK: reduz baud rate para gerar LOW prolongado
+    uart_set_baudrate(DMX_UART_PORT, 90000); // ou até 80000
 
-    // BREAK (LOW)
-    gpio_set_level(DMX_TX_PIN, 0);
-    esp_rom_delay_us(100);
+    uint8_t zero = 0x00;
+    uart_write_bytes(DMX_UART_PORT, (const char *)&zero, 1);
+    uart_wait_tx_done(DMX_UART_PORT, portMAX_DELAY);
 
-    // MAB (HIGH)
-    gpio_set_level(DMX_TX_PIN, 1);
+    // volta para DMX normal
+    uart_set_baudrate(DMX_UART_PORT, DMX_BAUDRATE);
+
     esp_rom_delay_us(12);
-
-    // Liga novamente a UART ao pino
-    uart_set_pin(DMX_UART_PORT,
-                 DMX_TX_PIN,
-                 UART_PIN_NO_CHANGE,
-                 UART_PIN_NO_CHANGE,
-                 UART_PIN_NO_CHANGE);
 }
 
 void dmx_task(void *arg)
 {
-
     uart_config_t uart_config = {
         .baud_rate = DMX_BAUDRATE,
         .data_bits = UART_DATA_8_BITS,
@@ -876,9 +868,7 @@ void dmx_task(void *arg)
     };
 
     ESP_ERROR_CHECK(uart_driver_install(DMX_UART_PORT, 1024, 0, 0, NULL, 0));
-
     ESP_ERROR_CHECK(uart_param_config(DMX_UART_PORT, &uart_config));
-
     ESP_ERROR_CHECK(uart_set_pin(DMX_UART_PORT,
                                  DMX_TX_PIN,
                                  UART_PIN_NO_CHANGE,
@@ -889,29 +879,36 @@ void dmx_task(void *arg)
 
     memset(quadroDMX, 0, sizeof(quadroDMX));
 
-    uint32_t k = 0;
-    uint32_t kfixo = 0;
+    // =========================
+    // TIMER REAL (NOVO)
+    // =========================
+    int64_t last_frame_us = 0;
 
-     bool estado = 0;
+    int64_t last_bpm_us = 0;
+    bool estado = 0;
+    uint32_t kfixo = 0;
 
     while (1)
     {
         xSemaphoreTake(semaphore_dmx, portMAX_DELAY);
 
-        char payload[16];
+        int64_t now_us = esp_timer_get_time();
 
-        k = k + 1;
+        // inicialização
+        if (last_frame_us == 0)
+            last_frame_us = now_us;
 
         if (xQueueReceive(mqtt_dmx_queue, &dmx_data, 0))
         {
-
-            static bool strobo_on = true;
-            static TickType_t last_toggle = 0;
-
-            ESP_LOGI(TAG_MQTT, "DMX data received. R=%d, G=%d, B=%d, W=%d, StroboMode=%d, BPM=%d",
-                     dmx_data.R, dmx_data.G, dmx_data.B, dmx_data.W, dmx_data.stroboMode, dmx_data.BPM);
+            ESP_LOGI(TAG_MQTT,
+                     "DMX data received. R=%d G=%d B=%d W=%d StroboMode=%d BPM=%d",
+                     dmx_data.R, dmx_data.G, dmx_data.B, dmx_data.W,
+                     dmx_data.stroboMode, dmx_data.BPM);
         }
 
+        // =========================
+        // MODO NORMAL
+        // =========================
         if (dmx_data.stroboMode == 0)
         {
             quadroDMX[1] = dmx_data.R;
@@ -920,27 +917,31 @@ void dmx_task(void *arg)
             quadroDMX[4] = dmx_data.W;
         }
 
+        // =========================
+        // MODO STROBO (BPM REAL)
+        // =========================
         else
         {
+            int periodo_us = (60000000 / dmx_data.BPM); // 1 ciclo completo
 
-            int bpmConvertido = 60000 / dmx_data.BPM;
-            
-           
-
-            if ((k % bpmConvertido) == 0)
+            if ((now_us - last_bpm_us) >= periodo_us)
             {
-                printf("bpm: %d | dmx: %d\n", bpmConvertido, dmx_data.BPM);
-                kfixo = k;
+                last_bpm_us = now_us;
+
+                kfixo = now_us;
                 estado = 1;
+
                 quadroDMX[1] = dmx_data.R;
                 quadroDMX[2] = dmx_data.G;
                 quadroDMX[3] = dmx_data.B;
                 quadroDMX[4] = dmx_data.W;
             }
 
-            else if (k == kfixo + 100)
+            // OFF depois de ~100ms (mantém sua ideia original)
+            else if ((now_us - kfixo) >= 100000)
             {
                 estado = 1;
+
                 quadroDMX[1] = 0;
                 quadroDMX[2] = 0;
                 quadroDMX[3] = 0;
@@ -948,23 +949,22 @@ void dmx_task(void *arg)
             }
         }
 
-        if ((k % 25) == 0 || (estado == 1))
+        // =========================
+        // FRAME DMX (60Hz aprox)
+        // =========================
+        if ((now_us - last_frame_us) >= 16667 || (estado == 1))
         {
+            last_frame_us = now_us;
             estado = 0;
-            // 1. Gera o BREAK
+
             dmx_send_break();
 
-            // 2. Envia o quadro DMX
             uart_write_bytes(DMX_UART_PORT,
                              (const char *)quadroDMX,
                              sizeof(quadroDMX));
 
-            // 3. Espera terminar
             uart_wait_tx_done(DMX_UART_PORT, portMAX_DELAY);
         }
-
-        // 4. Aguarda até o próximo quadro
-        // vTaskDelay(pdMS_TO_TICKS(25));   // ~40 quadros/s
     }
 }
 // ================= MAIN =================
